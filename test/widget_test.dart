@@ -1,30 +1,62 @@
-// This is a basic Flutter widget test.
-//
-// To perform an interaction with a widget in your test, use the WidgetTester
-// utility in the flutter_test package. For example, you can send tap and scroll
-// gestures. You can also use WidgetTester to find child widgets in the widget
-// tree, read text, and verify that the values of widget properties are correct.
-
-import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-
-import 'package:nidou/main.dart';
+import 'package:nidou/models/user.dart';
 
 void main() {
-  testWidgets('Counter increments smoke test', (WidgetTester tester) async {
-    // Build our app and trigger a frame.
-    await tester.pumpWidget(const MyApp());
+  group('AppUser Model Tests', () {
+    test('Crea una instancia correcta de AppUser', () {
+      const user = AppUser(
+        id: '12345',
+        name: 'Carlos Ruiz',
+        email: 'carlos@test.com',
+        role: AppUser.roleEstudiante,
+      );
 
-    // Verify that our counter starts at 0.
-    expect(find.text('0'), findsOneWidget);
-    expect(find.text('1'), findsNothing);
+      expect(user.id, '12345');
+      expect(user.name, 'Carlos Ruiz');
+      expect(user.email, 'carlos@test.com');
+      expect(user.role, 'estudiante');
+      expect(user.isEstudiante, isTrue);
+      expect(user.isArrendador, isFalse);
+    });
 
-    // Tap the '+' icon and trigger a frame.
-    await tester.tap(find.byIcon(Icons.add));
-    await tester.pump();
+    test('Serialización toMap y deserialización fromMap', () {
+      final map = {
+        'id': '67890',
+        'name': 'Ana Gómez',
+        'email': 'ana@arrendador.com',
+        'role': AppUser.roleArrendador,
+      };
 
-    // Verify that our counter has incremented.
-    expect(find.text('0'), findsNothing);
-    expect(find.text('1'), findsOneWidget);
+      final user = AppUser.fromMap(map);
+      expect(user.id, '67890');
+      expect(user.name, 'Ana Gómez');
+      expect(user.email, 'ana@arrendador.com');
+      expect(user.role, 'arrendador');
+      expect(user.isArrendador, isTrue);
+      expect(user.isEstudiante, isFalse);
+
+      final serialized = user.toMap();
+      expect(serialized['id'], '67890');
+      expect(serialized['name'], 'Ana Gómez');
+      expect(serialized['email'], 'ana@arrendador.com');
+      expect(serialized['role'], 'arrendador');
+      // Aseguramos que la contraseña NUNCA forme parte de la estructura
+      expect(serialized.containsKey('password'), isFalse);
+    });
+
+    test('copyWith preserva valores no alterados', () {
+      const user = AppUser(
+        id: 'u1',
+        name: 'Laura',
+        email: 'laura@nido.com',
+        role: AppUser.roleEstudiante,
+      );
+
+      final updated = user.copyWith(name: 'Laura Sofia');
+      expect(updated.id, 'u1');
+      expect(updated.name, 'Laura Sofia');
+      expect(updated.email, 'laura@nido.com');
+      expect(updated.role, 'estudiante');
+    });
   });
 }
