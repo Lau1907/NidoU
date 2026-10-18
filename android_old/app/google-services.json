@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "354569036334",
+    "project_id": "nidou-15ea6",
+    "storage_bucket": "nidou-15ea6.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:354569036334:android:4a3dd3f99d374947ecf5bf",
+        "android_client_info": {
+          "package_name": "com.example.nidou"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCPIYcE5CMa1hcQRVmG5eqSltNeTXh2Jco"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
