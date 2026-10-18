@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../theme/app_colors.dart';
 import '../viewmodels/auth_viewmodel.dart';
+import 'publish_property_view.dart';
 
 /// Vista provisional para la pantalla principal tras iniciar sesión.
 /// Cumple con la issue #5 permitiendo verificar la persistencia y el cierre de sesión.
@@ -158,6 +159,35 @@ class PropertySearchView extends StatelessWidget {
                   ],
                 ),
               ),
+              if (user?.isArrendador == true) ...[
+                const SizedBox(height: 16),
+                ElevatedButton.icon(
+                  onPressed: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => const PublishPropertyView(),
+                      ),
+                    );
+                  },
+                  icon: const Icon(Icons.add_home_work_rounded),
+                  label: const Text(
+                    '+ Publicar propiedad',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.terracota,
+                    foregroundColor: AppColors.blanco,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    elevation: 2,
+                  ),
+                ),
+              ],
               const SizedBox(height: 28),
 
               // Placeholder informativo
@@ -220,6 +250,24 @@ class PropertySearchView extends StatelessWidget {
           ),
         ),
       ),
+      floatingActionButton: user?.isArrendador == true
+          ? FloatingActionButton.extended(
+              onPressed: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => const PublishPropertyView(),
+                  ),
+                );
+              },
+              backgroundColor: AppColors.terracota,
+              foregroundColor: AppColors.blanco,
+              icon: const Icon(Icons.add),
+              label: const Text(
+                'Publicar propiedad',
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
+            )
+          : null,
     );
   }
 
