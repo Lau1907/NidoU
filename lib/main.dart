@@ -32,7 +32,7 @@ class NidoUApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.indigo),
-        useMaterialDesign: true,
+        useMaterial3: true,
       ),
       home: const FirebaseTestView(),
     );
