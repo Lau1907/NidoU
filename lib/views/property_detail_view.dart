@@ -1,7 +1,10 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart'; // Added for Clipboard
+import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter_map/flutter_map.dart';
+import 'package:latlong2/latlong.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../models/property.dart';
@@ -25,6 +28,57 @@ class _PropertyDetailViewState extends State<PropertyDetailView> {
   static const Color texto = Color(0xFF3A2E2A);
 
   bool _loadingOwner = false;
+  bool _isFavorite = false;
+  bool _isStudent = false;
+
+  static const Map<String, IconData> _serviceIcons = {
+    'Agua': Icons.water_drop,
+    'Luz': Icons.bolt,
+    'Internet': Icons.wifi,
+    'Amueblado': Icons.chair,
+    'Lavandería': Icons.local_laundry_service,
+    'Estacionamiento': Icons.local_parking,
+    'Gas': Icons.local_fire_department,
+    'TV Cable': Icons.tv,
+  };
+
+  @override
+  void initState() {
+    super.initState();
+    _loadFavoriteState();
+  }
+
+  Future<void> _loadFavoriteState() async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+    try {
+      final doc = await FirebaseFirestore.instance.collection('users').doc(uid).get();
+      final data = doc.data() ?? {};
+      final role = (data['role'] ?? '').toString().toUpperCase();
+      final rawFavs = data['favorites'];
+      final favIds = rawFavs is List ? rawFavs.map((e) => e.toString()).toSet() : <String>{};
+      if (mounted) {
+        setState(() {
+          _isStudent = role == 'ESTUDIANTE';
+          _isFavorite = favIds.contains(widget.property.id);
+        });
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _toggleFavorite() async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+    final update = _isFavorite
+        ? FieldValue.arrayRemove([widget.property.id])
+        : FieldValue.arrayUnion([widget.property.id]);
+    try {
+      await FirebaseFirestore.instance.collection('users').doc(uid).update({'favorites': update});
+      if (mounted) {
+        setState(() => _isFavorite = !_isFavorite);
+      }
+    } catch (_) {}
+  }
 
   Future<void> _openMap() async {
     final property = widget.property;
@@ -126,35 +180,136 @@ class _PropertyDetailViewState extends State<PropertyDetailView> {
       final name = (owner['name'] ?? owner['nombre'] ?? 'Arrendador').toString();
       final email = (owner['email'] ?? '').toString();
       final phone = (owner['phone'] ?? owner['telefono'] ?? '').toString();
+      final bio = (owner['bio'] ?? '').toString().trim();
+      final schedule = (owner['schedule'] ?? '').toString().trim();
+      final photoBase64 = (owner['photoBase64'] ?? '').toString().trim();
+
+      Uint8List? photoBytes;
+      if (photoBase64.isNotEmpty) {
+        try {
+          final clean = photoBase64.contains(',') ? photoBase64.split(',').last : photoBase64;
+          photoBytes = base64Decode(clean);
+        } catch (_) {}
+      }
 
       showModalBottomSheet(
         context: context,
         backgroundColor: arena,
+        isScrollControlled: true,
         shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
         ),
         builder: (ctx) => Padding(
-          padding: const EdgeInsets.all(24),
+          padding: EdgeInsets.only(
+            left: 24,
+            right: 24,
+            top: 24,
+            bottom: MediaQuery.of(ctx).viewInsets.bottom + 24,
+          ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const Text('Contactar arrendador', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: texto)),
-              const SizedBox(height: 12),
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                leading: const CircleAvatar(backgroundColor: salvia, child: Icon(Icons.person, color: texto)),
-                title: Text(name, style: const TextStyle(fontWeight: FontWeight.bold, color: texto)),
-                subtitle: Text([if (email.isNotEmpty) email, if (phone.isNotEmpty) phone].join(' • '), style: const TextStyle(color: texto)),
+              const SizedBox(height: 14),
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(2),
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      border: Border.all(color: terracota, width: 2),
+                    ),
+                    child: CircleAvatar(
+                      radius: 26,
+                      backgroundColor: salvia,
+                      backgroundImage: photoBytes != null ? MemoryImage(photoBytes) : null,
+                      child: photoBytes == null
+                          ? Text(
+                              name.isNotEmpty ? name[0].toUpperCase() : 'A',
+                              style: const TextStyle(fontWeight: FontWeight.bold, color: texto, fontSize: 20),
+                            )
+                          : null,
+                    ),
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(name, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: texto)),
+                        const SizedBox(height: 2),
+                        Text(
+                          [if (email.isNotEmpty) email, if (phone.isNotEmpty) phone].join(' • '),
+                          style: const TextStyle(color: texto, fontSize: 13),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
               ),
-              const SizedBox(height: 16),
+              if (bio.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: salvia.withValues(alpha: 0.6)),
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Icon(Icons.notes, size: 16, color: terracota),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          bio,
+                          style: const TextStyle(color: texto, fontSize: 13, fontStyle: FontStyle.italic),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+              if (schedule.isNotEmpty) ...[
+                const SizedBox(height: 10),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: salvia.withValues(alpha: 0.25),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: salvia, width: 1),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.schedule, size: 16, color: terracota),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'Horario: $schedule',
+                          style: const TextStyle(color: texto, fontSize: 12, fontWeight: FontWeight.w600),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+              const SizedBox(height: 18),
               if (phone.isNotEmpty)
                 Column(
                   children: [
                     SizedBox(
                       width: double.infinity,
                       child: ElevatedButton.icon(
-                        style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF25D366), foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(vertical: 12)),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF25D366),
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        ),
                         icon: const Icon(Icons.chat),
                         label: const Text('Enviar WhatsApp'),
                         onPressed: () async {
@@ -173,7 +328,12 @@ class _PropertyDetailViewState extends State<PropertyDetailView> {
                   children: [
                     Expanded(
                       child: ElevatedButton.icon(
-                        style: ElevatedButton.styleFrom(backgroundColor: terracota, foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(vertical: 12)),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: terracota,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        ),
                         icon: const Icon(Icons.email),
                         label: const Text('Enviar correo'),
                         onPressed: () async {
@@ -226,6 +386,7 @@ class _PropertyDetailViewState extends State<PropertyDetailView> {
       builder: (context, snapshot) {
         final role = snapshot.data?.get('role')?.toString().toUpperCase() ?? '';
         final hideContact = isOwner || role == 'ARRENDADOR';
+
         return Scaffold(
           backgroundColor: arena,
           appBar: AppBar(
@@ -245,22 +406,35 @@ class _PropertyDetailViewState extends State<PropertyDetailView> {
                   onPressed: _deleteProperty,
                 ),
               ],
+              if (!isOwner && _isStudent)
+                IconButton(
+                  icon: Icon(_isFavorite ? Icons.favorite : Icons.favorite_border),
+                  tooltip: _isFavorite ? 'Quitar de favoritos' : 'Guardar en favoritos',
+                  color: Colors.white,
+                  onPressed: _toggleFavorite,
+                ),
             ],
           ),
           body: SingleChildScrollView(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                // Hero photo
                 SizedBox(height: 240, child: PropertyImage(urls: property.photos)),
                 Padding(
                   padding: const EdgeInsets.all(16),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
+                      // Type chip + price
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          Chip(label: Text(property.type.toUpperCase()), backgroundColor: salvia, labelStyle: const TextStyle(color: texto, fontWeight: FontWeight.bold)),
+                          Chip(
+                            label: Text(property.type.toUpperCase()),
+                            backgroundColor: salvia,
+                            labelStyle: const TextStyle(color: texto, fontWeight: FontWeight.bold),
+                          ),
                           Text(price, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: terracota)),
                         ],
                       ),
@@ -268,31 +442,57 @@ class _PropertyDetailViewState extends State<PropertyDetailView> {
                       Text(property.title, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: texto)),
                       const SizedBox(height: 6),
                       const Divider(height: 24),
+
+                      // Description
                       const Text('Descripción', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: texto)),
                       const SizedBox(height: 6),
                       Text(property.description, style: const TextStyle(color: texto, height: 1.4)),
                       const SizedBox(height: 16),
+
+                      // Services with icons
                       if (property.services.isNotEmpty) ...[
                         const Text('Servicios incluidos', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: texto)),
-                        const SizedBox(height: 8),
+                        const SizedBox(height: 10),
                         Wrap(
-                          spacing: 8,
-                          runSpacing: 6,
-                          children: property.services.map((s) => Chip(label: Text(s), backgroundColor: Colors.white, labelStyle: const TextStyle(color: texto))).toList(),
+                          spacing: 12,
+                          runSpacing: 8,
+                          children: property.services.map((s) {
+                            final icon = _serviceIcons[s] ?? Icons.check_circle_outline;
+                            return Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(20),
+                                border: Border.all(color: salvia),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(icon, size: 16, color: terracota),
+                                  const SizedBox(width: 6),
+                                  Text(s, style: const TextStyle(color: texto, fontSize: 13)),
+                                ],
+                              ),
+                            );
+                          }).toList(),
                         ),
                         const SizedBox(height: 16),
                       ],
+
+                      // Location card with mini-map
                       Card(
                         color: Colors.white,
+                        elevation: 2,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                         child: Padding(
                           padding: const EdgeInsets.all(12),
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              const Text('Ubicación', style: TextStyle(fontWeight: FontWeight.bold, color: texto)),
+                              const Text('Ubicación', style: TextStyle(fontWeight: FontWeight.bold, color: texto, fontSize: 15)),
                               const SizedBox(height: 4),
                               Text(property.location, style: const TextStyle(color: texto)),
-                              const SizedBox(height: 8),
+                              const SizedBox(height: 6),
                               Row(
                                 children: [
                                   const Icon(Icons.directions_walk, size: 18, color: terracota),
@@ -300,6 +500,40 @@ class _PropertyDetailViewState extends State<PropertyDetailView> {
                                   Text('${property.distanceMinutes} min a pie del campus', style: const TextStyle(color: texto)),
                                 ],
                               ),
+                              // Mini-map if coordinates available
+                              if (property.latitude != null && property.longitude != null) ...[
+                                const SizedBox(height: 10),
+                                ClipRRect(
+                                  borderRadius: BorderRadius.circular(10),
+                                  child: SizedBox(
+                                    height: 140,
+                                    width: double.infinity,
+                                    child: FlutterMap(
+                                      options: MapOptions(
+                                        initialCenter: LatLng(property.latitude!, property.longitude!),
+                                        initialZoom: 15,
+                                        interactionOptions: const InteractionOptions(flags: InteractiveFlag.none),
+                                      ),
+                                      children: [
+                                        TileLayer(
+                                          urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                                          userAgentPackageName: 'com.example.nidou',
+                                        ),
+                                        MarkerLayer(
+                                          markers: [
+                                            Marker(
+                                              point: LatLng(property.latitude!, property.longitude!),
+                                              width: 36,
+                                              height: 36,
+                                              child: const Icon(Icons.location_pin, color: Colors.red, size: 36),
+                                            ),
+                                          ],
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ],
                               const SizedBox(height: 10),
                               SizedBox(
                                 width: double.infinity,
