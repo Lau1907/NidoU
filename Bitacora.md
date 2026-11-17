@@ -21,11 +21,11 @@
 
 ## Definition of Done (DoD)
 
-- [ ] El código compila sin errores y se ejecuta en emulador o dispositivo real.
-- [ ] Se cumplen todos los criterios de aceptación del issue.
-- [ ] El Pull Request fue revisado y aprobado por la otra integrante.
-- [ ] El código está fusionado en `main` y el issue está cerrado.
-- [ ] Se dejó evidencia (captura, video corto o descripción de cómo probarlo).
+- [x] El código compila sin errores y se ejecuta en emulador o dispositivo real.
+- [x] Se cumplen todos los criterios de aceptación del issue.
+- [x] El Pull Request fue revisado y aprobado por la otra integrante.
+- [x] El código está fusionado en `main` y el issue está cerrado.
+- [x] Se dejó evidencia (captura, video corto o descripción de cómo probarlo).
 
 ---
 
