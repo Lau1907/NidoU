@@ -1,24 +1,41 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/foundation.dart';
 import '../models/property.dart';
 
 class PropertyRepository {
-  final FirebaseFirestore? _firestore;
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
-  PropertyRepository({
-    FirebaseFirestore? firestore,
-  }) : _firestore = firestore;
-
-  FirebaseFirestore get _effectiveFirestore =>
-      _firestore ?? FirebaseFirestore.instance;
-
-  /// Guarda el documento de la propiedad en la colección "properties" de Firestore.
-  /// La propiedad ya incluye su lista de URLs en el campo photos.
   Future<Property> createProperty(Property property) async {
-    final docRef = _effectiveFirestore.collection('properties').doc();
-    final propertyToSave = property.copyWith(id: docRef.id);
+    final docRef = await _firestore
+        .collection('properties')
+        .add(property.toMap());
+    final doc = await docRef.get();
+    return Property.fromFirestore(doc);
+  }
 
-    await docRef.set(propertyToSave.toMap());
+  Future<List<Property>> getProperties() async {
+    try {
+      final snapshot = await _firestore.collection('properties').get();
+      final List<Property> list = [];
+      for (final doc in snapshot.docs) {
+        try {
+          list.add(Property.fromFirestore(doc));
+        } catch (e) {
+          debugPrint('Error parseando propiedad ${doc.id}: $e');
+        }
+      }
+      list.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+      return list;
+    } catch (e) {
+      debugPrint('Error en getProperties: $e');
+      rethrow;
+    }
+  }
 
-    return propertyToSave;
+  Future<dynamic> getOwnerById(String ownerId) async {
+    if (ownerId.isEmpty) return null;
+    final doc = await _firestore.collection('users').doc(ownerId).get();
+    if (!doc.exists) return null;
+    return doc.data();
   }
 }

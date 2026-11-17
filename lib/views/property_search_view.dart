@@ -1,319 +1,362 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import '../theme/app_colors.dart';
-import '../viewmodels/auth_viewmodel.dart';
+import '../viewmodels/property_search_viewmodel.dart';
+import 'property_detail_view.dart';
 import 'publish_property_view.dart';
 
-/// Vista provisional para la pantalla principal tras iniciar sesión.
-/// Cumple con la issue #5 permitiendo verificar la persistencia y el cierre de sesión.
 class PropertySearchView extends StatelessWidget {
   const PropertySearchView({super.key});
 
   @override
   Widget build(BuildContext context) {
-    final authVM = context.watch<AuthViewModel>();
-    final user = authVM.user;
+    return ChangeNotifierProvider(
+      create: (_) => PropertySearchViewModel()..loadProperties(),
+      child: const _PropertySearchBody(),
+    );
+  }
+}
 
-    return Scaffold(
-      backgroundColor: AppColors.arena,
-      appBar: AppBar(
-        backgroundColor: AppColors.arena,
-        elevation: 0,
-        title: Row(
-          children: [
-            Container(
-              width: 36,
-              height: 36,
-              decoration: const BoxDecoration(
-                color: AppColors.terracota,
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(
-                Icons.home_outlined,
-                color: AppColors.blanco,
-                size: 20,
-              ),
-            ),
-            const SizedBox(width: 10),
-            const Text(
-              'NidoU',
-              style: TextStyle(
-                color: AppColors.texto,
-                fontWeight: FontWeight.w800,
-                fontSize: 22,
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          IconButton(
-            tooltip: 'Cerrar sesión',
-            icon: const Icon(Icons.logout_rounded, color: AppColors.terracota),
-            onPressed: () => _confirmSignOut(context, authVM),
-          ),
-        ],
-      ),
-      body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(24.0),
+class _PropertySearchBody extends StatefulWidget {
+  const _PropertySearchBody();
+
+  @override
+  State<_PropertySearchBody> createState() => _PropertySearchViewState();
+}
+
+class _PropertySearchViewState extends State<_PropertySearchBody> {
+  static const Color terracota = Color(0xFFB85042);
+  static const Color arena = Color(0xFFE7E8D1);
+  static const Color salvia = Color(0xFFA7BEAE);
+  static const Color texto = Color(0xFF3A2E2A);
+
+  final TextEditingController _searchCtrl = TextEditingController();
+  bool _isLandlord = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkUserRole();
+  }
+
+  Future<void> _checkUserRole() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+    try {
+      final doc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
+      final role = (doc.data()?['role'] ?? doc.data()?['rol'] ?? '').toString().toLowerCase();
+      if (mounted) {
+        setState(() => _isLandlord = role == 'arrendador' || role == 'landlord');
+      }
+    } catch (_) {}
+  }
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
+  void _showFilterSheet(PropertySearchViewModel vm) {
+    double tempPrice = vm.maxPrice ?? 10000;
+    int tempDist = vm.maxDistance ?? 60;
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: arena,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setModalState) => Padding(
+          padding: const EdgeInsets.all(20),
           child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Tarjeta de bienvenida con información de usuario y rol
-              Container(
-                padding: const EdgeInsets.all(20.0),
-                decoration: BoxDecoration(
-                  color: AppColors.blanco,
-                  borderRadius: BorderRadius.circular(16),
-                  boxShadow: [
-                    BoxShadow(
-                      color: AppColors.texto.withValues(alpha: 0.06),
-                      blurRadius: 10,
-                      offset: const Offset(0, 4),
-                    ),
-                  ],
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        CircleAvatar(
-                          backgroundColor: AppColors.salvia.withValues(alpha: 0.3),
-                          child: Text(
-                            (user?.name.isNotEmpty ?? false)
-                                ? user!.name[0].toUpperCase()
-                                : 'U',
-                            style: const TextStyle(
-                              color: AppColors.terracota,
-                              fontWeight: FontWeight.bold,
-                              fontSize: 18,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                user?.name.isNotEmpty == true
-                                    ? '¡Hola, ${user!.name}!'
-                                    : '¡Bienvenido a NidoU!',
-                                style: const TextStyle(
-                                  color: AppColors.texto,
-                                  fontSize: 18,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                              const SizedBox(height: 2),
-                              Text(
-                                user?.email ?? '',
-                                style: const TextStyle(
-                                  color: AppColors.hintTexto,
-                                  fontSize: 13,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                    const Divider(height: 28),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        const Text(
-                          'Rol actual:',
-                          style: TextStyle(
-                            color: AppColors.texto,
-                            fontWeight: FontWeight.w600,
-                            fontSize: 14,
-                          ),
-                        ),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 5,
-                          ),
-                          decoration: BoxDecoration(
-                            color: AppColors.salvia.withValues(alpha: 0.25),
-                            borderRadius: BorderRadius.circular(20),
-                            border: Border.all(
-                              color: AppColors.salvia,
-                              width: 1.2,
-                            ),
-                          ),
-                          child: Text(
-                            (user?.role ?? 'estudiante').toUpperCase(),
-                            style: const TextStyle(
-                              color: AppColors.texto,
-                              fontSize: 12,
-                              fontWeight: FontWeight.w700,
-                              letterSpacing: 0.5,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
+              const Text('Filtros avanzados',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: texto)),
+              const SizedBox(height: 16),
+              Text('Precio máximo: \$${tempPrice.toStringAsFixed(0)} MXN/mes',
+                  style: const TextStyle(color: texto)),
+              Slider(
+                value: tempPrice,
+                min: 1000,
+                max: 15000,
+                divisions: 28,
+                activeColor: terracota,
+                onChanged: (v) => setModalState(() => tempPrice = v),
               ),
-              if (user?.isArrendador == true) ...[
-                const SizedBox(height: 16),
-                ElevatedButton.icon(
-                  onPressed: () {
-                    Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) => const PublishPropertyView(),
-                      ),
-                    );
-                  },
-                  icon: const Icon(Icons.add_home_work_rounded),
-                  label: const Text(
-                    '+ Publicar propiedad',
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
+              Text('Distancia máxima: $tempDist min a pie', style: const TextStyle(color: texto)),
+              Slider(
+                value: tempDist.toDouble(),
+                min: 5,
+                max: 60,
+                divisions: 11,
+                activeColor: terracota,
+                onChanged: (v) => setModalState(() => tempDist = v.round()),
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () {
+                        vm.clearFilters();
+                        _searchCtrl.clear();
+                        Navigator.pop(ctx);
+                      },
+                      child: const Text('Limpiar'),
                     ),
                   ),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.terracota,
-                    foregroundColor: AppColors.blanco,
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(14),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: terracota,
+                        foregroundColor: Colors.white,
+                      ),
+                      onPressed: () {
+                        vm.setMaxPrice(tempPrice);
+                        vm.setMaxDistance(tempDist);
+                        Navigator.pop(ctx);
+                      },
+                      child: const Text('Aplicar'),
                     ),
-                    elevation: 2,
                   ),
-                ),
-              ],
-              const SizedBox(height: 28),
-
-              // Placeholder informativo
-              Expanded(
-                child: Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(
-                        Icons.travel_explore_rounded,
-                        size: 64,
-                        color: AppColors.salvia.withValues(alpha: 0.8),
-                      ),
-                      const SizedBox(height: 16),
-                      const Text(
-                        'Sesión iniciada con éxito',
-                        style: TextStyle(
-                          color: AppColors.texto,
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      const Padding(
-                        padding: EdgeInsets.symmetric(horizontal: 24.0),
-                        child: Text(
-                          'Aquí se integrará la búsqueda de propiedades. Para probar el flujo de autenticación, puedes cerrar sesión con el botón superior o el siguiente botón.',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            color: AppColors.texto,
-                            fontSize: 13.5,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 24),
-                      OutlinedButton.icon(
-                        onPressed: () => _confirmSignOut(context, authVM),
-                        icon: const Icon(Icons.logout, size: 18),
-                        label: const Text('Cerrar sesión'),
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: AppColors.terracota,
-                          side: const BorderSide(
-                            color: AppColors.terracota,
-                            width: 1.5,
-                          ),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 24,
-                            vertical: 12,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
+                ],
               ),
             ],
           ),
         ),
       ),
-      floatingActionButton: user?.isArrendador == true
-          ? FloatingActionButton.extended(
-              onPressed: () {
-                Navigator.of(context).push(
-                  MaterialPageRoute(
-                    builder: (_) => const PublishPropertyView(),
-                  ),
-                );
-              },
-              backgroundColor: AppColors.terracota,
-              foregroundColor: AppColors.blanco,
-              icon: const Icon(Icons.add),
-              label: const Text(
-                'Publicar propiedad',
-                style: TextStyle(fontWeight: FontWeight.bold),
-              ),
-            )
-          : null,
     );
   }
 
-  void _confirmSignOut(BuildContext context, AuthViewModel authVM) {
-    showDialog(
-      context: context,
-      builder: (dialogCtx) => AlertDialog(
-        backgroundColor: AppColors.arena,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
-        ),
-        title: const Text(
-          'Cerrar sesión',
-          style: TextStyle(
-            color: AppColors.texto,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-        content: const Text(
-          '¿Estás seguro de que deseas salir de NidoU?',
-          style: TextStyle(color: AppColors.texto),
-        ),
+  @override
+  Widget build(BuildContext context) {
+    final vm = context.watch<PropertySearchViewModel>();
+
+    return Scaffold(
+      backgroundColor: arena,
+      appBar: AppBar(
+        title: const Text('Buscar alojamiento'),
+        backgroundColor: terracota,
+        foregroundColor: Colors.white,
         actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogCtx).pop(),
-            child: const Text(
-              'Cancelar',
-              style: TextStyle(color: AppColors.texto),
-            ),
+          IconButton(
+            tooltip: 'Filtros',
+            icon: const Icon(Icons.tune),
+            onPressed: () => _showFilterSheet(vm),
           ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.terracota,
-              foregroundColor: AppColors.blanco,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(10),
-              ),
-            ),
-            onPressed: () {
-              Navigator.of(dialogCtx).pop();
-              authVM.signOut();
-            },
-            child: const Text('Cerrar sesión'),
+          IconButton(
+            tooltip: 'Cerrar sesión',
+            icon: const Icon(Icons.logout),
+            onPressed: () => FirebaseAuth.instance.signOut(),
           ),
         ],
       ),
+      floatingActionButton: _isLandlord
+          ? FloatingActionButton.extended(
+              backgroundColor: terracota,
+              foregroundColor: Colors.white,
+              onPressed: () async {
+                await Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => PublishPropertyView()),
+                );
+                if (mounted) vm.loadProperties();
+              },
+              icon: const Icon(Icons.add),
+              label: const Text('Publicar propiedad'),
+            )
+          : null,
+      body: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 12, 12, 6),
+            child: TextField(
+              controller: _searchCtrl,
+              onChanged: vm.setSearchQuery,
+              decoration: InputDecoration(
+                hintText: 'Buscar por título o colonia...',
+                prefixIcon: const Icon(Icons.search, color: terracota),
+                suffixIcon: _searchCtrl.text.isNotEmpty
+                    ? IconButton(
+                        icon: const Icon(Icons.clear),
+                        onPressed: () {
+                          _searchCtrl.clear();
+                          vm.setSearchQuery('');
+                        },
+                      )
+                    : null,
+                filled: true,
+                fillColor: Colors.white,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide.none,
+                ),
+              ),
+            ),
+          ),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+            child: Row(
+              children: [
+                for (final entry in {
+                  'todos': 'Todos',
+                  'habitacion': 'Habitación',
+                  'departamento': 'Departamento',
+                  'estudio': 'Estudio',
+                }.entries)
+                  Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: ChoiceChip(
+                      label: Text(entry.value),
+                      selected: vm.selectedType == entry.key,
+                      selectedColor: salvia,
+                      onSelected: (_) => vm.setSelectedType(entry.key),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          Expanded(
+            child: RefreshIndicator(
+              onRefresh: vm.loadProperties,
+              child: _buildList(vm),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildList(PropertySearchViewModel vm) {
+    if (vm.isLoading) {
+      return const Center(child: CircularProgressIndicator(color: terracota));
+    }
+    if (vm.errorMessage != null) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(vm.errorMessage!, textAlign: TextAlign.center, style: const TextStyle(color: texto)),
+              const SizedBox(height: 12),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(backgroundColor: terracota, foregroundColor: Colors.white),
+                onPressed: vm.loadProperties,
+                child: const Text('Reintentar'),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+    if (vm.filteredProperties.isEmpty) {
+      return ListView(
+        children: [
+          const SizedBox(height: 80),
+          const Icon(Icons.search_off, size: 56, color: texto),
+          const SizedBox(height: 12),
+          const Center(
+            child: Text('No hay propiedades con estos filtros', style: TextStyle(color: texto)),
+          ),
+          const SizedBox(height: 12),
+          Center(
+            child: OutlinedButton(
+              onPressed: () {
+                _searchCtrl.clear();
+                vm.clearFilters();
+              },
+              child: const Text('Limpiar filtros'),
+            ),
+          ),
+        ],
+      );
+    }
+
+    return ListView.builder(
+      padding: const EdgeInsets.fromLTRB(12, 4, 12, 80),
+      itemCount: vm.filteredProperties.length,
+      itemBuilder: (_, i) {
+        final property = vm.filteredProperties[i];
+        return Card(
+          margin: const EdgeInsets.only(bottom: 12),
+          clipBehavior: Clip.antiAlias,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          child: InkWell(
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => PropertyDetailView(property: property)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                SizedBox(
+                  height: 160,
+                  width: double.infinity,
+                  child: property.photos.isNotEmpty
+                      ? Image.network(
+                          property.photos.first,
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, __, ___) => Container(
+                            color: salvia.withValues(alpha: 0.3),
+                            child: const Icon(Icons.home, size: 48, color: texto),
+                          ),
+                        )
+                      : Container(
+                          color: salvia.withValues(alpha: 0.3),
+                          child: const Icon(Icons.home, size: 48, color: texto),
+                        ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Expanded(
+                            child: Text(
+                              property.title,
+                              style: const TextStyle(
+                                  fontSize: 17, fontWeight: FontWeight.bold, color: texto),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          Text(
+                            '\$${property.price.toStringAsFixed(0)}/mes',
+                            style: const TextStyle(
+                                fontSize: 16, fontWeight: FontWeight.bold, color: terracota),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                      Text(property.location,
+                          style: const TextStyle(color: texto, fontSize: 13),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis),
+                      const SizedBox(height: 6),
+                      Row(
+                        children: [
+                          const Icon(Icons.directions_walk, size: 16, color: terracota),
+                          const SizedBox(width: 4),
+                          Text('${property.distanceMinutes} min a pie',
+                              style: const TextStyle(fontSize: 13, color: texto)),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 }
