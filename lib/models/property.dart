@@ -12,6 +12,9 @@ class Property {
   final List<String> photos;
   final String ownerId;
   final DateTime createdAt;
+  final String? university;
+  final double? latitude;
+  final double? longitude;
 
   static const String typeHabitacion = 'habitacion';
   static const String typeDepartamento = 'departamento';
@@ -29,6 +32,9 @@ class Property {
     required this.photos,
     required this.ownerId,
     required this.createdAt,
+    this.university,
+    this.latitude,
+    this.longitude,
   });
 
   Map<String, dynamic> toMap() {
@@ -44,6 +50,9 @@ class Property {
       'photos': photos,
       'ownerId': ownerId,
       'createdAt': Timestamp.fromDate(createdAt),
+      if (university != null) 'university': university,
+      if (latitude != null) 'latitude': latitude,
+      if (longitude != null) 'longitude': longitude,
     };
   }
 
@@ -68,6 +77,9 @@ class Property {
           const [],
       ownerId: data['ownerId'] as String? ?? '',
       createdAt: _parseDateTime(data['createdAt']),
+      university: data['university'] as String?,
+      latitude: data['latitude'] != null ? (data['latitude'] as num).toDouble() : null,
+      longitude: data['longitude'] != null ? (data['longitude'] as num).toDouble() : null,
     );
   }
 
@@ -93,6 +105,9 @@ class Property {
           const [],
       ownerId: data['ownerId'] as String? ?? '',
       createdAt: _parseDateTime(data['createdAt']),
+      university: data['university'] as String?,
+      latitude: data['latitude'] != null ? (data['latitude'] as num).toDouble() : null,
+      longitude: data['longitude'] != null ? (data['longitude'] as num).toDouble() : null,
     );
   }
 
@@ -119,6 +134,9 @@ class Property {
     List<String>? photos,
     String? ownerId,
     DateTime? createdAt,
+    String? university,
+    double? latitude,
+    double? longitude,
   }) {
     return Property(
       id: id ?? this.id,
@@ -132,6 +150,9 @@ class Property {
       photos: photos ?? this.photos,
       ownerId: ownerId ?? this.ownerId,
       createdAt: createdAt ?? this.createdAt,
+      university: university ?? this.university,
+      latitude: latitude ?? this.latitude,
+      longitude: longitude ?? this.longitude,
     );
   }
 }

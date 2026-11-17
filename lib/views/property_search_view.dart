@@ -1,362 +1,343 @@
+import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
-import '../viewmodels/property_search_viewmodel.dart';
+import 'package:latlong2/latlong.dart';
+import 'package:nidou/models/property.dart';
+import 'package:nidou/utils/universities.dart';
+import 'package:nidou/views/profile_view.dart';
+import 'package:nidou/views/publish_property_view.dart';
+import 'package:nidou/widgets/property_image.dart';
 import 'property_detail_view.dart';
-import 'publish_property_view.dart';
 
-class PropertySearchView extends StatelessWidget {
-  const PropertySearchView({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return ChangeNotifierProvider(
-      create: (_) => PropertySearchViewModel()..loadProperties(),
-      child: const _PropertySearchBody(),
-    );
-  }
-}
-
-class _PropertySearchBody extends StatefulWidget {
-  const _PropertySearchBody();
+class PropertySearchView extends StatefulWidget {
+  const PropertySearchView({Key? key}) : super(key: key);
 
   @override
-  State<_PropertySearchBody> createState() => _PropertySearchViewState();
+  State<PropertySearchView> createState() => _PropertySearchViewState();
 }
 
-class _PropertySearchViewState extends State<_PropertySearchBody> {
-  static const Color terracota = Color(0xFFB85042);
-  static const Color arena = Color(0xFFE7E8D1);
-  static const Color salvia = Color(0xFFA7BEAE);
-  static const Color texto = Color(0xFF3A2E2A);
+class _PropertySearchViewState extends State<PropertySearchView> {
+  static const Color _terracota = Color(0xFFB85042);
+  static const Color _arena = Color(0xFFE7E8D1);
+  static const Color _texto = Color(0xFF3A2E2A);
 
-  final TextEditingController _searchCtrl = TextEditingController();
-  bool _isLandlord = false;
+  String _userRole = '';
+  String _selectedUniversity = 'Todas las universidades';
+  bool _isLoadingUser = true;
 
   @override
   void initState() {
     super.initState();
-    _checkUserRole();
+    _loadUserData();
   }
 
-  Future<void> _checkUserRole() async {
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return;
-    try {
-      final doc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
-      final role = (doc.data()?['role'] ?? doc.data()?['rol'] ?? '').toString().toLowerCase();
-      if (mounted) {
-        setState(() => _isLandlord = role == 'arrendador' || role == 'landlord');
+  Future<void> _loadUserData() async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid != null) {
+      try {
+        final doc = await FirebaseFirestore.instance.collection('users').doc(uid).get();
+        final data = doc.data() ?? {};
+        _userRole = (data['role'] ?? '').toString().toUpperCase();
+        final userUniv = data['university'] as String?;
+        if (userUniv != null && universities.containsKey(userUniv)) {
+          _selectedUniversity = userUniv;
+        }
+      } catch (_) {}
+    }
+    if (mounted) {
+      setState(() {
+        _isLoadingUser = false;
+      });
+    }
+  }
+
+  Stream<List<Property>> _propertyStream() {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    final base = FirebaseFirestore.instance.collection('properties').snapshots();
+    if (_userRole == 'ARRENDADOR' && uid != null) {
+      return base.map((snapshot) => snapshot.docs
+          .map((doc) => Property.fromFirestore(doc))
+          .where((p) => p.ownerId == uid)
+          .toList());
+    }
+    // ESTUDIANTE or unknown role: all properties
+    return base.map((snapshot) => snapshot.docs.map((doc) => Property.fromFirestore(doc)).toList());
+  }
+
+  List<Property> _sortAndFilterProperties(List<Property> properties) {
+    if (_userRole != 'ESTUDIANTE' || _selectedUniversity == 'Todas las universidades') {
+      return properties;
+    }
+
+    final targetCoords = universities[_selectedUniversity];
+    final selectedCity = _selectedUniversity.toLowerCase();
+
+    // Crear una lista mutable
+    final list = List<Property>.from(properties);
+
+    list.sort((a, b) {
+      // 1. Coincidencia exacta de universidad
+      final aMatchesUniv = (a.university ?? '').trim() == _selectedUniversity.trim();
+      final bMatchesUniv = (b.university ?? '').trim() == _selectedUniversity.trim();
+      if (aMatchesUniv && !bMatchesUniv) return -1;
+      if (!aMatchesUniv && bMatchesUniv) return 1;
+
+      // 2. Coincidencia de nombre de ciudad / región en location
+      final aLocation = a.location.toLowerCase();
+      final bLocation = b.location.toLowerCase();
+      bool aMatchesCity = false;
+      bool bMatchesCity = false;
+      if (selectedCity.contains('dolores')) {
+        aMatchesCity = aLocation.contains('dolores');
+        bMatchesCity = bLocation.contains('dolores');
+      } else if (selectedCity.contains('salvatierra')) {
+        aMatchesCity = aLocation.contains('salvatierra');
+        bMatchesCity = bLocation.contains('salvatierra');
+      } else if (selectedCity.contains('bicentenario') || selectedCity.contains('silao')) {
+        aMatchesCity = aLocation.contains('silao') || aLocation.contains('bicentenario');
+        bMatchesCity = bLocation.contains('silao') || bLocation.contains('bicentenario');
       }
-    } catch (_) {}
-  }
 
-  @override
-  void dispose() {
-    _searchCtrl.dispose();
-    super.dispose();
-  }
+      if (aMatchesCity && !bMatchesCity) return -1;
+      if (!aMatchesCity && bMatchesCity) return 1;
 
-  void _showFilterSheet(PropertySearchViewModel vm) {
-    double tempPrice = vm.maxPrice ?? 10000;
-    int tempDist = vm.maxDistance ?? 60;
+      // 3. Minutos a pie (si tiene coordenadas reales calcular a la univ, sino usar distanceMinutes)
+      int aMinutes = a.distanceMinutes;
+      int bMinutes = b.distanceMinutes;
+      if (targetCoords != null && a.latitude != null && a.longitude != null) {
+        aMinutes = calculateWalkingMinutes(LatLng(a.latitude!, a.longitude!), targetCoords);
+      }
+      if (targetCoords != null && b.latitude != null && b.longitude != null) {
+        bMinutes = calculateWalkingMinutes(LatLng(b.latitude!, b.longitude!), targetCoords);
+      }
 
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: arena,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setModalState) => Padding(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text('Filtros avanzados',
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: texto)),
-              const SizedBox(height: 16),
-              Text('Precio máximo: \$${tempPrice.toStringAsFixed(0)} MXN/mes',
-                  style: const TextStyle(color: texto)),
-              Slider(
-                value: tempPrice,
-                min: 1000,
-                max: 15000,
-                divisions: 28,
-                activeColor: terracota,
-                onChanged: (v) => setModalState(() => tempPrice = v),
-              ),
-              Text('Distancia máxima: $tempDist min a pie', style: const TextStyle(color: texto)),
-              Slider(
-                value: tempDist.toDouble(),
-                min: 5,
-                max: 60,
-                divisions: 11,
-                activeColor: terracota,
-                onChanged: (v) => setModalState(() => tempDist = v.round()),
-              ),
-              const SizedBox(height: 12),
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton(
-                      onPressed: () {
-                        vm.clearFilters();
-                        _searchCtrl.clear();
-                        Navigator.pop(ctx);
-                      },
-                      child: const Text('Limpiar'),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: terracota,
-                        foregroundColor: Colors.white,
-                      ),
-                      onPressed: () {
-                        vm.setMaxPrice(tempPrice);
-                        vm.setMaxDistance(tempDist);
-                        Navigator.pop(ctx);
-                      },
-                      child: const Text('Aplicar'),
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
+      return aMinutes.compareTo(bMinutes);
+    });
+
+    return list;
   }
 
   @override
   Widget build(BuildContext context) {
-    final vm = context.watch<PropertySearchViewModel>();
+    final isOwner = _userRole == 'ARRENDADOR';
+    final isStudent = _userRole == 'ESTUDIANTE';
 
     return Scaffold(
-      backgroundColor: arena,
+      backgroundColor: _arena,
       appBar: AppBar(
-        title: const Text('Buscar alojamiento'),
-        backgroundColor: terracota,
+        title: Text(isOwner ? 'Mis propiedades' : 'Buscar alojamiento'),
+        backgroundColor: _terracota,
         foregroundColor: Colors.white,
         actions: [
           IconButton(
-            tooltip: 'Filtros',
-            icon: const Icon(Icons.tune),
-            onPressed: () => _showFilterSheet(vm),
-          ),
-          IconButton(
-            tooltip: 'Cerrar sesión',
-            icon: const Icon(Icons.logout),
-            onPressed: () => FirebaseAuth.instance.signOut(),
+            icon: const Icon(Icons.person),
+            tooltip: 'Mi perfil',
+            onPressed: () async {
+              await Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ProfileView()));
+              _loadUserData();
+            },
           ),
         ],
       ),
-      floatingActionButton: _isLandlord
-          ? FloatingActionButton.extended(
-              backgroundColor: terracota,
-              foregroundColor: Colors.white,
-              onPressed: () async {
-                await Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => PublishPropertyView()),
-                );
-                if (mounted) vm.loadProperties();
-              },
-              icon: const Icon(Icons.add),
-              label: const Text('Publicar propiedad'),
-            )
-          : null,
-      body: Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 12, 12, 6),
-            child: TextField(
-              controller: _searchCtrl,
-              onChanged: vm.setSearchQuery,
-              decoration: InputDecoration(
-                hintText: 'Buscar por título o colonia...',
-                prefixIcon: const Icon(Icons.search, color: terracota),
-                suffixIcon: _searchCtrl.text.isNotEmpty
-                    ? IconButton(
-                        icon: const Icon(Icons.clear),
-                        onPressed: () {
-                          _searchCtrl.clear();
-                          vm.setSearchQuery('');
-                        },
-                      )
-                    : null,
-                filled: true,
-                fillColor: Colors.white,
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide.none,
-                ),
-              ),
-            ),
-          ),
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-            child: Row(
+      body: _isLoadingUser
+          ? const Center(child: CircularProgressIndicator())
+          : Column(
               children: [
-                for (final entry in {
-                  'todos': 'Todos',
-                  'habitacion': 'Habitación',
-                  'departamento': 'Departamento',
-                  'estudio': 'Estudio',
-                }.entries)
-                  Padding(
-                    padding: const EdgeInsets.only(right: 8),
-                    child: ChoiceChip(
-                      label: Text(entry.value),
-                      selected: vm.selectedType == entry.key,
-                      selectedColor: salvia,
-                      onSelected: (_) => vm.setSelectedType(entry.key),
-                    ),
-                  ),
-              ],
-            ),
-          ),
-          Expanded(
-            child: RefreshIndicator(
-              onRefresh: vm.loadProperties,
-              child: _buildList(vm),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildList(PropertySearchViewModel vm) {
-    if (vm.isLoading) {
-      return const Center(child: CircularProgressIndicator(color: terracota));
-    }
-    if (vm.errorMessage != null) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(vm.errorMessage!, textAlign: TextAlign.center, style: const TextStyle(color: texto)),
-              const SizedBox(height: 12),
-              ElevatedButton(
-                style: ElevatedButton.styleFrom(backgroundColor: terracota, foregroundColor: Colors.white),
-                onPressed: vm.loadProperties,
-                child: const Text('Reintentar'),
-              ),
-            ],
-          ),
-        ),
-      );
-    }
-    if (vm.filteredProperties.isEmpty) {
-      return ListView(
-        children: [
-          const SizedBox(height: 80),
-          const Icon(Icons.search_off, size: 56, color: texto),
-          const SizedBox(height: 12),
-          const Center(
-            child: Text('No hay propiedades con estos filtros', style: TextStyle(color: texto)),
-          ),
-          const SizedBox(height: 12),
-          Center(
-            child: OutlinedButton(
-              onPressed: () {
-                _searchCtrl.clear();
-                vm.clearFilters();
-              },
-              child: const Text('Limpiar filtros'),
-            ),
-          ),
-        ],
-      );
-    }
-
-    return ListView.builder(
-      padding: const EdgeInsets.fromLTRB(12, 4, 12, 80),
-      itemCount: vm.filteredProperties.length,
-      itemBuilder: (_, i) {
-        final property = vm.filteredProperties[i];
-        return Card(
-          margin: const EdgeInsets.only(bottom: 12),
-          clipBehavior: Clip.antiAlias,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-          child: InkWell(
-            onTap: () => Navigator.push(
-              context,
-              MaterialPageRoute(builder: (_) => PropertyDetailView(property: property)),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                SizedBox(
-                  height: 160,
-                  width: double.infinity,
-                  child: property.photos.isNotEmpty
-                      ? Image.network(
-                          property.photos.first,
-                          fit: BoxFit.cover,
-                          errorBuilder: (_, __, ___) => Container(
-                            color: salvia.withValues(alpha: 0.3),
-                            child: const Icon(Icons.home, size: 48, color: texto),
-                          ),
-                        )
-                      : Container(
-                          color: salvia.withValues(alpha: 0.3),
-                          child: const Icon(Icons.home, size: 48, color: texto),
+                if (isStudent)
+                  Container(
+                    color: Colors.white,
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.school, size: 20, color: _terracota),
+                        const SizedBox(width: 8),
+                        const Text(
+                          'Mi universidad:',
+                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: _texto),
                         ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Expanded(
-                            child: Text(
-                              property.title,
-                              style: const TextStyle(
-                                  fontSize: 17, fontWeight: FontWeight.bold, color: texto),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: DropdownButtonHideUnderline(
+                            child: DropdownButton<String>(
+                              value: _selectedUniversity,
+                              isDense: true,
+                              isExpanded: true,
+                              style: const TextStyle(fontSize: 12, color: _texto, fontWeight: FontWeight.w600),
+                              icon: const Icon(Icons.arrow_drop_down, color: _terracota),
+                              items: [
+                                const DropdownMenuItem(
+                                  value: 'Todas las universidades',
+                                  child: Text('Todas las universidades', overflow: TextOverflow.ellipsis),
+                                ),
+                                ...universities.keys.map((univ) {
+                                  return DropdownMenuItem(
+                                    value: univ,
+                                    child: Text(univ, overflow: TextOverflow.ellipsis),
+                                  );
+                                }),
+                              ],
+                              onChanged: (val) {
+                                if (val != null) {
+                                  setState(() => _selectedUniversity = val);
+                                }
+                              },
                             ),
                           ),
-                          Text(
-                            '\$${property.price.toStringAsFixed(0)}/mes',
-                            style: const TextStyle(
-                                fontSize: 16, fontWeight: FontWeight.bold, color: terracota),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 4),
-                      Text(property.location,
-                          style: const TextStyle(color: texto, fontSize: 13),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis),
-                      const SizedBox(height: 6),
-                      Row(
-                        children: [
-                          const Icon(Icons.directions_walk, size: 16, color: terracota),
-                          const SizedBox(width: 4),
-                          Text('${property.distanceMinutes} min a pie',
-                              style: const TextStyle(fontSize: 13, color: texto)),
-                        ],
-                      ),
-                    ],
+                        ),
+                      ],
+                    ),
+                  ),
+                Expanded(
+                  child: StreamBuilder<List<Property>>(
+                    stream: _propertyStream(),
+                    builder: (context, snapshot) {
+                      if (!snapshot.hasData) {
+                        return const Center(child: CircularProgressIndicator());
+                      }
+                      final rawProperties = snapshot.data ?? [];
+                      final properties = _sortAndFilterProperties(rawProperties);
+
+                      if (properties.isEmpty) {
+                        return const Center(child: Text('No hay propiedades disponibles'));
+                      }
+
+                      return ListView.builder(
+                        padding: const EdgeInsets.symmetric(vertical: 8),
+                        itemCount: properties.length,
+                        itemBuilder: (context, index) {
+                          final property = properties[index];
+                          final priceText = '\$${property.price.toStringAsFixed(0)}/mes';
+
+                          int displayMinutes = property.distanceMinutes;
+                          if (isStudent &&
+                              _selectedUniversity != 'Todas las universidades' &&
+                              property.latitude != null &&
+                              property.longitude != null) {
+                            final targetCoords = universities[_selectedUniversity];
+                            if (targetCoords != null) {
+                              displayMinutes = calculateWalkingMinutes(
+                                LatLng(property.latitude!, property.longitude!),
+                                targetCoords,
+                              );
+                            }
+                          }
+
+                          return Card(
+                            margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                            clipBehavior: Clip.antiAlias,
+                            elevation: 2,
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                            child: InkWell(
+                              onTap: () async {
+                                final changed = await Navigator.of(context).push<bool>(
+                                  MaterialPageRoute(builder: (_) => PropertyDetailView(property: property)),
+                                );
+                                if (changed == true && mounted) {
+                                  setState(() {});
+                                }
+                              },
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  PropertyImage(urls: property.photos),
+                                  Padding(
+                                    padding: const EdgeInsets.all(12),
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Row(
+                                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                          children: [
+                                            Expanded(
+                                              child: Text(
+                                                property.title,
+                                                style: const TextStyle(
+                                                  fontSize: 16,
+                                                  fontWeight: FontWeight.bold,
+                                                ),
+                                                maxLines: 1,
+                                                overflow: TextOverflow.ellipsis,
+                                              ),
+                                            ),
+                                            const SizedBox(width: 8),
+                                            Text(
+                                              priceText,
+                                              style: const TextStyle(
+                                                fontSize: 16,
+                                                fontWeight: FontWeight.bold,
+                                                color: Color(0xFFB85042),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                        const SizedBox(height: 6),
+                                        Row(
+                                          children: [
+                                            const Icon(Icons.location_on, size: 16, color: Colors.grey),
+                                            const SizedBox(width: 4),
+                                            Expanded(
+                                              child: Text(
+                                                property.location,
+                                                style: const TextStyle(color: Colors.black87),
+                                                maxLines: 1,
+                                                overflow: TextOverflow.ellipsis,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                        const SizedBox(height: 4),
+                                        Row(
+                                          children: [
+                                            const Icon(Icons.directions_walk, size: 16, color: Color(0xFFB85042)),
+                                            const SizedBox(width: 4),
+                                            Text(
+                                              '$displayMinutes min a pie',
+                                              style: const TextStyle(color: Colors.black54, fontSize: 13),
+                                            ),
+                                            if (property.university != null && property.university!.isNotEmpty) ...[
+                                              const SizedBox(width: 8),
+                                              const Text('•', style: TextStyle(color: Colors.black38)),
+                                              const SizedBox(width: 8),
+                                              Expanded(
+                                                child: Text(
+                                                  property.university!,
+                                                  style: const TextStyle(color: Colors.black54, fontSize: 12),
+                                                  maxLines: 1,
+                                                  overflow: TextOverflow.ellipsis,
+                                                ),
+                                              ),
+                                            ],
+                                          ],
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          );
+                        },
+                      );
+                    },
                   ),
                 ),
               ],
             ),
-          ),
-        );
-      },
+      floatingActionButton: isOwner
+          ? FloatingActionButton(
+              onPressed: () async {
+                final created = await Navigator.push<bool>(
+                  context,
+                  MaterialPageRoute(builder: (_) => const PublishPropertyView()),
+                );
+                if (created == true && mounted) {
+                  setState(() {});
+                }
+              },
+              tooltip: 'Publicar propiedad',
+              child: const Icon(Icons.add),
+            )
+          : null,
     );
   }
 }

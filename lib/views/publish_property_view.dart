@@ -1,846 +1,658 @@
+import 'dart:convert';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
-import '../models/property.dart';
-import '../models/user.dart';
-import '../theme/app_colors.dart';
-import '../viewmodels/auth_viewmodel.dart';
-import '../viewmodels/publish_property_viewmodel.dart';
+import 'package:flutter_map/flutter_map.dart';
+import 'package:http/http.dart' as http;
+import 'package:image_picker/image_picker.dart';
+import 'package:latlong2/latlong.dart';
+import 'package:nidou/models/property.dart';
+import 'package:nidou/repositories/property_repository.dart';
+import 'package:nidou/utils/universities.dart';
+import 'package:nidou/widgets/property_image.dart';
 
-class PublishPropertyView extends StatelessWidget {
-  const PublishPropertyView({super.key});
+class PublishPropertyView extends StatefulWidget {
+  final Property? propertyToEdit;
 
-  @override
-  Widget build(BuildContext context) {
-    // Si el ViewModel ya está en el árbol (por ejemplo en tests), se reutiliza;
-    // de lo contrario, se provee automáticamente.
-    try {
-      Provider.of<PublishPropertyViewModel>(context, listen: false);
-      return const _PublishPropertyFormWrapper();
-    } catch (_) {
-      return ChangeNotifierProvider(
-        create: (_) => PublishPropertyViewModel(),
-        child: const _PublishPropertyFormWrapper(),
-      );
-    }
-  }
-}
-
-class _PublishPropertyFormWrapper extends StatelessWidget {
-  const _PublishPropertyFormWrapper();
+  const PublishPropertyView({super.key, this.propertyToEdit});
 
   @override
-  Widget build(BuildContext context) {
-    final authVM = context.watch<AuthViewModel>();
-    final user = authVM.user;
-
-    // Validación de rol: sólo accesible para arrendador
-    if (user == null || user.role != AppUser.roleArrendador) {
-      return Scaffold(
-        backgroundColor: AppColors.arena,
-        appBar: AppBar(
-          backgroundColor: AppColors.arena,
-          elevation: 0,
-          leading: IconButton(
-            icon: const Icon(Icons.arrow_back_rounded, color: AppColors.texto),
-            onPressed: () => Navigator.of(context).maybePop(),
-          ),
-          title: const Text(
-            'Acceso restringido',
-            style: TextStyle(
-              color: AppColors.texto,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-        ),
-        body: Center(
-          child: Padding(
-            padding: const EdgeInsets.all(32.0),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(20),
-                  decoration: BoxDecoration(
-                    color: AppColors.terracota.withValues(alpha: 0.1),
-                    shape: BoxShape.circle,
-                  ),
-                  child: const Icon(
-                    Icons.lock_person_rounded,
-                    size: 64,
-                    color: AppColors.terracota,
-                  ),
-                ),
-                const SizedBox(height: 24),
-                const Text(
-                  'Solo para arrendadores',
-                  style: TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                    color: AppColors.texto,
-                  ),
-                ),
-                const SizedBox(height: 12),
-                const Text(
-                  'Esta pantalla es de uso exclusivo para usuarios con rol de arrendador. Si consideras que esto es un error, por favor verifica tu cuenta.',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    fontSize: 14,
-                    color: AppColors.texto,
-                    height: 1.4,
-                  ),
-                ),
-                const SizedBox(height: 28),
-                ElevatedButton.icon(
-                  onPressed: () => Navigator.of(context).maybePop(),
-                  icon: const Icon(Icons.arrow_back, size: 18),
-                  label: const Text('Volver al inicio'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.terracota,
-                    foregroundColor: AppColors.blanco,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 24,
-                      vertical: 12,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      );
-    }
-
-    return const _PublishPropertyFormView();
-  }
+  State<PublishPropertyView> createState() => _PublishPropertyViewState();
 }
 
-class _PublishPropertyFormView extends StatefulWidget {
-  const _PublishPropertyFormView();
+class _PublishPropertyViewState extends State<PublishPropertyView> {
+  // Paleta de colores de NidoU
+  static const Color _terracota = Color(0xFFB85042);
+  static const Color _arena = Color(0xFFE7E8D1);
+  static const Color _salvia = Color(0xFFA7BEAE);
+  static const Color _texto = Color(0xFF3A2E2A);
 
-  @override
-  State<_PublishPropertyFormView> createState() =>
-      _PublishPropertyFormViewState();
-}
-
-class _PublishPropertyFormViewState extends State<_PublishPropertyFormView> {
   final _formKey = GlobalKey<FormState>();
 
-  final _titleController = TextEditingController();
-  final _priceController = TextEditingController();
-  final _distanceController = TextEditingController();
-  final _locationController = TextEditingController();
-  final _descriptionController = TextEditingController();
-  final _photoUrlController = TextEditingController();
+  // 1. Fotos
+  final List<String> _photos = [];
+  final ImagePicker _picker = ImagePicker();
 
-  String _selectedType = Property.typeHabitacion;
-  final Set<String> _selectedServices = <String>{};
+  // 2. Datos principales
+  final TextEditingController _titleController = TextEditingController();
+  final TextEditingController _priceController = TextEditingController();
+  String _selectedType = 'habitacion';
+  final TextEditingController _descriptionController = TextEditingController();
 
-  // Servicios disponibles
-  static const List<Map<String, dynamic>> _availableServices = [
-    {'id': 'agua', 'label': 'Agua', 'icon': Icons.water_drop_outlined},
-    {'id': 'internet', 'label': 'Internet', 'icon': Icons.wifi_rounded},
-    {'id': 'amueblado', 'label': 'Amueblado', 'icon': Icons.chair_outlined},
-    {'id': 'luz', 'label': 'Luz', 'icon': Icons.lightbulb_outline_rounded},
-    {
-      'id': 'lavandería',
-      'label': 'Lavandería',
-      'icon': Icons.local_laundry_service_outlined
-    },
+  // 3. Servicios incluidos
+  final List<String> _availableServices = const [
+    'Agua',
+    'Luz',
+    'Internet',
+    'Amueblado',
+    'Lavandería',
+    'Estacionamiento',
   ];
+  final Set<String> _selectedServices = {};
 
-  static const List<Map<String, String>> _propertyTypes = [
-    {'id': Property.typeHabitacion, 'label': 'Habitación'},
-    {'id': Property.typeDepartamento, 'label': 'Departamento'},
-    {'id': Property.typeEstudio, 'label': 'Estudio'},
-  ];
+  // 4. Ubicación y cercanía
+  String _selectedUniversity = defaultUniversity;
+  final TextEditingController _locationController = TextEditingController();
+  final TextEditingController _minutesController = TextEditingController();
+  final MapController _mapController = MapController();
+  LatLng? _selectedPoint;
+  bool _isLoadingAddress = false;
+
+  bool _isSubmitting = false;
+
+  @override
+  void initState() {
+    super.initState();
+    final edit = widget.propertyToEdit;
+    if (edit != null) {
+      _titleController.text = edit.title;
+      _priceController.text = edit.price.toStringAsFixed(0);
+      _selectedType = edit.type.isNotEmpty ? edit.type : 'habitacion';
+      _descriptionController.text = edit.description;
+      _selectedServices.addAll(edit.services);
+      _photos.addAll(edit.photos);
+      if (edit.university != null && universities.containsKey(edit.university)) {
+        _selectedUniversity = edit.university!;
+      }
+      _locationController.text = edit.location;
+      _minutesController.text = edit.distanceMinutes.toString();
+
+      if (edit.latitude != null && edit.longitude != null) {
+        _selectedPoint = LatLng(edit.latitude!, edit.longitude!);
+      }
+    }
+  }
 
   @override
   void dispose() {
     _titleController.dispose();
     _priceController.dispose();
-    _distanceController.dispose();
-    _locationController.dispose();
     _descriptionController.dispose();
-    _photoUrlController.dispose();
+    _locationController.dispose();
+    _minutesController.dispose();
     super.dispose();
   }
 
-  void _addPhoto(PublishPropertyViewModel vm) {
-    final text = _photoUrlController.text.trim();
-    if (text.isEmpty) return;
-    final success = vm.addPhotoUrl(text);
-    if (success) {
-      _photoUrlController.clear();
-      FocusScope.of(context).unfocus();
+  Future<void> _pickPhoto() async {
+    if (_photos.length >= 3) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Solo puedes agregar un máximo de 3 fotos.')),
+      );
+      return;
+    }
+
+    final XFile? file = await _picker.pickImage(
+      source: ImageSource.gallery,
+      imageQuality: 45,
+      maxWidth: 800,
+    );
+    if (file == null) return;
+
+    final bytes = await file.readAsBytes();
+    final dataUri = 'data:image/jpeg;base64,${base64Encode(bytes)}';
+    setState(() {
+      _photos.add(dataUri);
+    });
+  }
+
+  void _removePhoto(int index) {
+    if (index >= 0 && index < _photos.length) {
+      setState(() {
+        _photos.removeAt(index);
+      });
     }
   }
 
-  Future<void> _submit(
-      BuildContext context, PublishPropertyViewModel vm, AppUser user) async {
-    // Quita foco del teclado
-    FocusScope.of(context).unfocus();
+  void _onUniversityChanged(String? newUniv) {
+    if (newUniv == null || newUniv == _selectedUniversity) return;
+    setState(() {
+      _selectedUniversity = newUniv;
+    });
 
+    final univCoords = universities[newUniv];
+    if (univCoords != null) {
+      _mapController.move(univCoords, 14);
+      if (_selectedPoint != null) {
+        final minutes = calculateWalkingMinutes(_selectedPoint!, univCoords);
+        _minutesController.text = minutes.toString();
+      }
+    }
+  }
+
+  Future<void> _onMapTapped(LatLng point) async {
+    setState(() {
+      _selectedPoint = point;
+      _isLoadingAddress = true;
+    });
+
+    // 1. Calcular minutos automáticamente hacia la universidad seleccionada
+    final univCoords = universities[_selectedUniversity] ?? universities[defaultUniversity]!;
+    final minutes = calculateWalkingMinutes(point, univCoords);
+    _minutesController.text = minutes.toString();
+
+    // 2. Reverse geocoding con OpenStreetMap Nominatim
+    try {
+      final url = Uri.parse(
+        'https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${point.latitude}&lon=${point.longitude}',
+      );
+      final response = await http.get(url, headers: {
+        'User-Agent': 'NidoUApp/1.0',
+      }).timeout(const Duration(seconds: 8));
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body) as Map<String, dynamic>;
+        final address = data['address'] as Map<String, dynamic>? ?? {};
+
+        final road = address['road'] ?? address['pedestrian'] ?? address['street'];
+        final suburb = address['suburb'] ?? address['neighbourhood'] ?? address['quarter'];
+        final city = address['city'] ?? address['town'] ?? address['village'] ?? address['municipality'];
+
+        String resolvedText = '';
+        if (road != null || suburb != null || city != null) {
+          final parts = [road, suburb, city].where((p) => p != null && p.toString().isNotEmpty).toList();
+          resolvedText = parts.join(', ');
+        } else {
+          resolvedText = data['display_name']?.toString() ?? '';
+        }
+
+        if (resolvedText.isEmpty) {
+          resolvedText = 'Ubicación marcada (${point.latitude.toStringAsFixed(4)}, ${point.longitude.toStringAsFixed(4)})';
+        }
+
+        if (mounted) {
+          setState(() {
+            _locationController.text = resolvedText;
+            _isLoadingAddress = false;
+          });
+        }
+      } else {
+        if (mounted) {
+          setState(() {
+            _locationController.text =
+                'Ubicación marcada (${point.latitude.toStringAsFixed(4)}, ${point.longitude.toStringAsFixed(4)})';
+            _isLoadingAddress = false;
+          });
+        }
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _locationController.text =
+              'Ubicación marcada (${point.latitude.toStringAsFixed(4)}, ${point.longitude.toStringAsFixed(4)})';
+          _isLoadingAddress = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _submitProperty() async {
     if (!_formKey.currentState!.validate()) {
       return;
     }
 
-    final price =
-        double.tryParse(_priceController.text.trim().replaceAll(',', '.'));
-    final distance = int.tryParse(_distanceController.text.trim()) ?? 0;
+    if (_photos.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Debes agregar al menos una foto de la propiedad.')),
+      );
+      return;
+    }
 
-    final success = await vm.publish(
-      title: _titleController.text.trim(),
-      price: price,
-      distanceMinutes: distance,
-      type: _selectedType,
-      location: _locationController.text.trim(),
-      description: _descriptionController.text.trim(),
-      services: _selectedServices.toList(),
-      ownerId: user.id,
-    );
+    final currentUser = FirebaseAuth.instance.currentUser;
+    final ownerId = currentUser?.uid ?? '';
+    if (ownerId.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No se encontró una sesión activa de arrendador.')),
+      );
+      return;
+    }
 
-    if (!context.mounted) return;
+    final price = double.tryParse(_priceController.text.trim().replaceAll(',', '.')) ?? 0.0;
+    final distanceMinutes = int.tryParse(_minutesController.text.trim()) ?? 0;
 
-    if (success) {
+    setState(() => _isSubmitting = true);
+
+    final isEditing = widget.propertyToEdit != null;
+
+    try {
+      final property = Property(
+        id: isEditing ? widget.propertyToEdit!.id : '',
+        title: _titleController.text.trim(),
+        price: price,
+        distanceMinutes: distanceMinutes,
+        type: _selectedType,
+        location: _locationController.text.trim(),
+        description: _descriptionController.text.trim(),
+        services: _selectedServices.toList(),
+        photos: List<String>.from(_photos),
+        ownerId: ownerId,
+        createdAt: isEditing ? widget.propertyToEdit!.createdAt : DateTime.now(),
+        university: _selectedUniversity,
+        latitude: _selectedPoint?.latitude,
+        longitude: _selectedPoint?.longitude,
+      );
+
+      if (isEditing) {
+        await PropertyRepository().updateProperty(property);
+      } else {
+        await PropertyRepository().createProperty(property);
+      }
+
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: const Row(
-            children: [
-              Icon(Icons.check_circle_outline, color: AppColors.blanco),
-              SizedBox(width: 12),
-              Expanded(
-                child: Text(
-                  '¡Propiedad publicada con éxito!',
-                  style: TextStyle(
-                    color: AppColors.blanco,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          backgroundColor: AppColors.salvia,
-          behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-          ),
-          duration: const Duration(seconds: 3),
+          content: Text(isEditing ? 'Propiedad actualizada con éxito' : 'Propiedad publicada con éxito'),
+          backgroundColor: _terracota,
         ),
       );
-      Navigator.of(context).pop();
-    } else if (vm.errorMessage != null) {
+      Navigator.pop(context, true);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _isSubmitting = false);
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            vm.errorMessage!,
-            style: const TextStyle(color: AppColors.blanco),
-          ),
-          backgroundColor: AppColors.errorTexto,
-          behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-          ),
-        ),
+        SnackBar(content: Text('Error al guardar propiedad: $e')),
       );
     }
   }
 
+  InputDecoration _buildInputDecoration(String label, {Widget? suffixIcon}) {
+    const border = OutlineInputBorder(
+      borderRadius: BorderRadius.all(Radius.circular(12)),
+      borderSide: BorderSide(color: Colors.black26),
+    );
+    const focusedBorder = OutlineInputBorder(
+      borderRadius: BorderRadius.all(Radius.circular(12)),
+      borderSide: BorderSide(color: _terracota, width: 2),
+    );
+    return InputDecoration(
+      labelText: label,
+      labelStyle: const TextStyle(color: _texto),
+      filled: true,
+      fillColor: Colors.white,
+      border: border,
+      enabledBorder: border,
+      focusedBorder: focusedBorder,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      suffixIcon: suffixIcon,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final vm = context.watch<PublishPropertyViewModel>();
-    final authVM = context.watch<AuthViewModel>();
-    final user = authVM.user!;
+    final isEditing = widget.propertyToEdit != null;
+    final selectedPoint = _selectedPoint;
+    final initialUnivCoords = universities[_selectedUniversity] ?? universities[defaultUniversity]!;
 
     return Scaffold(
-      backgroundColor: AppColors.arena,
+      backgroundColor: _arena,
       appBar: AppBar(
-        backgroundColor: AppColors.arena,
-        elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back_rounded, color: AppColors.texto),
-          onPressed: () => Navigator.of(context).maybePop(),
-        ),
-        title: const Text(
-          'Publicar propiedad',
-          style: TextStyle(
-            color: AppColors.texto,
-            fontWeight: FontWeight.w800,
-            fontSize: 20,
-          ),
-        ),
+        title: Text(isEditing ? 'Editar propiedad' : 'Publicar propiedad'),
+        backgroundColor: _terracota,
+        foregroundColor: Colors.white,
       ),
-      body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-          child: Form(
-            key: _formKey,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                // Mensaje de error general si existe
-                if (vm.errorMessage != null) ...[
-                  Container(
-                    padding: const EdgeInsets.all(14),
-                    decoration: BoxDecoration(
-                      color: AppColors.errorFondo,
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(
-                        color: AppColors.errorTexto.withValues(alpha: 0.3),
-                      ),
-                    ),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+      body: Form(
+        key: _formKey,
+        child: ListView(
+          padding: const EdgeInsets.all(16),
+          children: [
+            // ==========================================
+            // 1. Fotos de la propiedad (máx. 3)
+            // ==========================================
+            const Text(
+              'Fotos de la propiedad (máx. 3)',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: _texto),
+            ),
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              onPressed: _photos.length >= 3 || _isSubmitting ? null : _pickPhoto,
+              icon: const Icon(Icons.add_photo_alternate),
+              label: const Text('Seleccionar foto de la galería'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: _terracota,
+                side: const BorderSide(color: _terracota, width: 1.5),
+                minimumSize: const Size(double.infinity, 44),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              ),
+            ),
+            if (_photos.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              SizedBox(
+                height: 110,
+                child: ListView.separated(
+                  scrollDirection: Axis.horizontal,
+                  itemCount: _photos.length,
+                  separatorBuilder: (_, __) => const SizedBox(width: 10),
+                  itemBuilder: (context, index) {
+                    return Stack(
                       children: [
-                        const Icon(
-                          Icons.error_outline_rounded,
-                          color: AppColors.errorTexto,
-                          size: 20,
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(12),
+                          child: SizedBox(
+                            width: 110,
+                            height: 110,
+                            child: PropertyImage.single(imageUrl: _photos[index]),
+                          ),
                         ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: Text(
-                            vm.errorMessage!,
-                            style: const TextStyle(
-                              color: AppColors.errorTexto,
-                              fontSize: 13.5,
-                              fontWeight: FontWeight.w500,
+                        Positioned(
+                          top: 4,
+                          right: 4,
+                          child: GestureDetector(
+                            onTap: _isSubmitting ? null : () => _removePhoto(index),
+                            child: Container(
+                              padding: const EdgeInsets.all(4),
+                              decoration: const BoxDecoration(
+                                color: Colors.black54,
+                                shape: BoxShape.circle,
+                              ),
+                              child: const Icon(Icons.close, color: Colors.white, size: 16),
                             ),
                           ),
                         ),
                       ],
-                    ),
+                    );
+                  },
+                ),
+              ),
+            ],
+            const SizedBox(height: 20),
+
+            // ==========================================
+            // 2. Datos principales de la propiedad
+            // ==========================================
+            const Text(
+              'Datos principales',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: _texto),
+            ),
+            const SizedBox(height: 8),
+            TextFormField(
+              controller: _titleController,
+              decoration: _buildInputDecoration('Título del anuncio'),
+              validator: (v) {
+                if (v == null || v.trim().isEmpty) {
+                  return 'El título es obligatorio';
+                }
+                return null;
+              },
+            ),
+            const SizedBox(height: 12),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: TextFormField(
+                    controller: _priceController,
+                    keyboardType: TextInputType.number,
+                    decoration: _buildInputDecoration('Renta mensual (\$ MXN)'),
+                    validator: (v) {
+                      if (v == null || v.trim().isEmpty) {
+                        return 'Ingresa la renta';
+                      }
+                      final n = double.tryParse(v.trim().replaceAll(',', '.'));
+                      if (n == null || n <= 0) {
+                        return 'Renta inválida';
+                      }
+                      return null;
+                    },
                   ),
-                  const SizedBox(height: 16),
-                ],
-
-                // Sección 1: Datos principales
-                _buildSectionCard(
-                  title: 'Información general',
-                  icon: Icons.info_outline_rounded,
-                  children: [
-                    // Título
-                    TextFormField(
-                      controller: _titleController,
-                      textInputAction: TextInputAction.next,
-                      decoration: _inputDecoration(
-                        labelText: 'Título de la propiedad *',
-                        hintText: 'Ej. Habitación luminosa cerca del campus',
-                        prefixIcon: Icons.home_outlined,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: DropdownButtonFormField<String>(
+                    initialValue: _selectedType,
+                    decoration: _buildInputDecoration('Tipo'),
+                    dropdownColor: Colors.white,
+                    items: const [
+                      DropdownMenuItem(
+                        value: 'habitacion',
+                        child: Text('Habitación'),
                       ),
-                      validator: (value) {
-                        if (value == null || value.trim().isEmpty) {
-                          return 'Ingresa un título para la propiedad';
-                        }
-                        return null;
-                      },
-                    ),
-                    const SizedBox(height: 16),
-
-                    // Tipo de propiedad
-                    const Text(
-                      'Tipo de vivienda *',
-                      style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                        color: AppColors.texto,
+                      DropdownMenuItem(
+                        value: 'departamento',
+                        child: Text('Departamento'),
                       ),
-                    ),
-                    const SizedBox(height: 8),
-                    Wrap(
-                      spacing: 8,
-                      children: _propertyTypes.map((type) {
-                        final isSelected = _selectedType == type['id'];
-                        return ChoiceChip(
-                          label: Text(type['label']!),
-                          selected: isSelected,
-                          onSelected: (selected) {
-                            if (selected) {
-                              setState(() {
-                                _selectedType = type['id']!;
-                              });
+                      DropdownMenuItem(
+                        value: 'estudio',
+                        child: Text('Estudio'),
+                      ),
+                    ],
+                    onChanged: _isSubmitting
+                        ? null
+                        : (val) {
+                            if (val != null) {
+                              setState(() => _selectedType = val);
                             }
                           },
-                          selectedColor: AppColors.terracota,
-                          backgroundColor: AppColors.blanco,
-                          labelStyle: TextStyle(
-                            color:
-                                isSelected ? AppColors.blanco : AppColors.texto,
-                            fontWeight: FontWeight.w600,
-                          ),
-                          side: BorderSide(
-                            color: isSelected
-                                ? AppColors.terracota
-                                : AppColors.salvia,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            TextFormField(
+              controller: _descriptionController,
+              maxLines: 3,
+              decoration: _buildInputDecoration('Descripción'),
+              validator: (v) {
+                if (v == null || v.trim().isEmpty) {
+                  return 'La descripción es obligatoria';
+                }
+                return null;
+              },
+            ),
+            const SizedBox(height: 20),
+
+            // ==========================================
+            // 3. Servicios incluidos
+            // ==========================================
+            const Text(
+              'Servicios incluidos',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: _texto),
+            ),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: _availableServices.map((service) {
+                final isSelected = _selectedServices.contains(service);
+                return FilterChip(
+                  label: Text(
+                    service,
+                    style: TextStyle(
+                      color: isSelected ? Colors.white : _texto,
+                      fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                    ),
+                  ),
+                  selected: isSelected,
+                  selectedColor: _salvia,
+                  checkmarkColor: Colors.white,
+                  backgroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                  onSelected: _isSubmitting
+                      ? null
+                      : (bool selected) {
+                          setState(() {
+                            if (selected) {
+                              _selectedServices.add(service);
+                            } else {
+                              _selectedServices.remove(service);
+                            }
+                          });
+                        },
+                );
+              }).toList(),
+            ),
+            const SizedBox(height: 20),
+
+            // ==========================================
+            // 4. Ubicación y cercanía (en Card blanca)
+            // ==========================================
+            Card(
+              color: Colors.white,
+              elevation: 2,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Ubicación y cercanía',
+                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: _texto),
+                    ),
+                    const SizedBox(height: 12),
+                    DropdownButtonFormField<String>(
+                      initialValue: _selectedUniversity,
+                      decoration: _buildInputDecoration('Universidad cercana'),
+                      dropdownColor: Colors.white,
+                      isExpanded: true,
+                      items: universities.keys.map((univ) {
+                        return DropdownMenuItem<String>(
+                          value: univ,
+                          child: Text(
+                            univ,
+                            style: const TextStyle(fontSize: 13, color: _texto),
+                            overflow: TextOverflow.ellipsis,
                           ),
                         );
                       }).toList(),
+                      onChanged: _isSubmitting ? null : _onUniversityChanged,
                     ),
-                    const SizedBox(height: 16),
-
-                    // Precio al mes y Minutos a pie (en fila)
-                    Row(
-                      children: [
-                        // Precio
-                        Expanded(
-                          child: TextFormField(
-                            controller: _priceController,
-                            keyboardType:
-                                const TextInputType.numberWithOptions(
-                              decimal: true,
-                            ),
-                            textInputAction: TextInputAction.next,
-                            decoration: _inputDecoration(
-                              labelText: 'Precio al mes *',
-                              hintText: 'Ej. 3500',
-                              prefixIcon: Icons.attach_money_rounded,
-                            ),
-                            validator: (value) {
-                              if (value == null || value.trim().isEmpty) {
-                                return 'Ingresa el precio';
-                              }
-                              final numVal = double.tryParse(
-                                value.trim().replaceAll(',', '.'),
-                              );
-                              if (numVal == null || numVal <= 0) {
-                                return 'Precio mayor a 0';
-                              }
-                              return null;
-                            },
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        // Minutos a pie
-                        Expanded(
-                          child: TextFormField(
-                            controller: _distanceController,
-                            keyboardType: TextInputType.number,
-                            textInputAction: TextInputAction.next,
-                            decoration: _inputDecoration(
-                              labelText: 'Minutos a pie',
-                              hintText: 'Ej. 10',
-                              prefixIcon: Icons.directions_walk_rounded,
-                              suffixText: 'min',
-                            ),
-                            validator: (value) {
-                              if (value != null && value.trim().isNotEmpty) {
-                                final val = int.tryParse(value.trim());
-                                if (val == null || val < 0) {
-                                  return 'Minutos válidos';
-                                }
-                              }
-                              return null;
-                            },
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 16),
-
-                // Sección 2: Ubicación y Descripción
-                _buildSectionCard(
-                  title: 'Ubicación y detalles',
-                  icon: Icons.place_outlined,
-                  children: [
+                    const SizedBox(height: 12),
                     TextFormField(
                       controller: _locationController,
-                      textInputAction: TextInputAction.next,
-                      decoration: _inputDecoration(
-                        labelText: 'Ubicación (dirección) *',
-                        hintText: 'Ej. Av. Universidad 123, Col. Centro',
-                        prefixIcon: Icons.location_on_outlined,
+                      decoration: _buildInputDecoration(
+                        'Dirección o colonia',
+                        suffixIcon: _isLoadingAddress
+                            ? const Padding(
+                                padding: EdgeInsets.all(12),
+                                child: SizedBox(
+                                  width: 18,
+                                  height: 18,
+                                  child: CircularProgressIndicator(strokeWidth: 2, color: _terracota),
+                                ),
+                              )
+                            : null,
                       ),
-                      validator: (value) {
-                        if (value == null || value.trim().isEmpty) {
-                          return 'Ingresa la ubicación o dirección';
+                      validator: (v) {
+                        if (v == null || v.trim().isEmpty) {
+                          return 'La dirección o colonia es obligatoria';
                         }
                         return null;
                       },
                     ),
-                    const SizedBox(height: 16),
-                    TextFormField(
-                      controller: _descriptionController,
-                      maxLines: 4,
-                      textInputAction: TextInputAction.done,
-                      decoration: _inputDecoration(
-                        labelText: 'Descripción',
-                        hintText:
-                            'Describe el espacio, qué incluye, reglas de convivencia, etc.',
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 16),
-
-                // Sección 3: Servicios incluidos
-                _buildSectionCard(
-                  title: 'Servicios incluidos',
-                  icon: Icons.check_circle_outline_rounded,
-                  children: [
-                    const Text(
-                      'Selecciona los servicios que incluye el alojamiento:',
-                      style: TextStyle(
-                        fontSize: 13.5,
-                        color: AppColors.texto,
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: _availableServices.map((service) {
-                        final id = service['id'] as String;
-                        final label = service['label'] as String;
-                        final icon = service['icon'] as IconData;
-                        final isSelected = _selectedServices.contains(id);
-
-                        return FilterChip(
-                          avatar: Icon(
-                            icon,
-                            size: 18,
-                            color: isSelected
-                                ? AppColors.blanco
-                                : AppColors.terracota,
+                    const SizedBox(height: 12),
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(12),
+                      child: SizedBox(
+                        height: 180,
+                        width: double.infinity,
+                        child: FlutterMap(
+                          mapController: _mapController,
+                          options: MapOptions(
+                            initialCenter: selectedPoint ?? initialUnivCoords,
+                            initialZoom: 13,
+                            onTap: _isSubmitting ? null : (tapPos, point) => _onMapTapped(point),
                           ),
-                          label: Text(label),
-                          selected: isSelected,
-                          onSelected: (selected) {
-                            setState(() {
-                              if (selected) {
-                                _selectedServices.add(id);
-                              } else {
-                                _selectedServices.remove(id);
-                              }
-                            });
-                          },
-                          selectedColor: AppColors.salvia,
-                          backgroundColor: AppColors.blanco,
-                          labelStyle: TextStyle(
-                            color: isSelected
-                                ? AppColors.blanco
-                                : AppColors.texto,
-                            fontWeight: FontWeight.w600,
-                          ),
-                          side: BorderSide(
-                            color: isSelected
-                                ? AppColors.salvia
-                                : AppColors.salvia.withValues(alpha: 0.5),
-                          ),
-                        );
-                      }).toList(),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 16),
-
-                // Sección 4: Fotografías (URLs con https://)
-                _buildSectionCard(
-                  title: 'Fotografías de la propiedad',
-                  icon: Icons.photo_library_outlined,
-                  trailing: Text(
-                    '${vm.photoUrls.length}/${PublishPropertyViewModel.maxPhotos}',
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      color: vm.photoUrls.isEmpty
-                          ? AppColors.errorTexto
-                          : AppColors.terracota,
-                    ),
-                  ),
-                  children: [
-                    const Text(
-                      'Agrega de 1 a 3 fotos pegando el enlace web seguro (debe comenzar con https://):',
-                      style: TextStyle(
-                        fontSize: 13.5,
-                        color: AppColors.texto,
+                          children: [
+                            TileLayer(
+                              urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                              userAgentPackageName: 'com.example.nidou',
+                            ),
+                            MarkerLayer(
+                              markers: [
+                                // Marcador de la universidad seleccionada
+                                Marker(
+                                  point: universities[_selectedUniversity] ?? universities[defaultUniversity]!,
+                                  width: 36,
+                                  height: 36,
+                                  child: const Icon(
+                                    Icons.school,
+                                    color: _terracota,
+                                    size: 32,
+                                  ),
+                                ),
+                                // Marcador del punto seleccionado para la propiedad
+                                if (selectedPoint != null)
+                                  Marker(
+                                    point: selectedPoint,
+                                    width: 40,
+                                    height: 40,
+                                    child: const Icon(
+                                      Icons.location_pin,
+                                      color: Colors.red,
+                                      size: 40,
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                     const SizedBox(height: 12),
-
-                    // Campo de texto para pegar enlace + botón para agregarla
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Expanded(
-                          child: TextFormField(
-                            controller: _photoUrlController,
-                            keyboardType: TextInputType.url,
-                            textInputAction: TextInputAction.done,
-                            onFieldSubmitted: (_) => _addPhoto(vm),
-                            decoration: _inputDecoration(
-                              labelText: 'Pega el enlace de una foto',
-                              hintText: 'https://ejemplo.com/foto.jpg',
-                              prefixIcon: Icons.link_rounded,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                        SizedBox(
-                          height: 48,
-                          child: ElevatedButton.icon(
-                            onPressed: vm.photoUrls.length >=
-                                    PublishPropertyViewModel.maxPhotos
-                                ? null
-                                : () => _addPhoto(vm),
-                            icon: const Icon(Icons.add, size: 20),
-                            label: const Text('Agregar'),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: AppColors.terracota,
-                              disabledBackgroundColor:
-                                  AppColors.terracota.withValues(alpha: 0.4),
-                              foregroundColor: AppColors.blanco,
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 16,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ],
+                    TextFormField(
+                      controller: _minutesController,
+                      keyboardType: TextInputType.number,
+                      decoration: _buildInputDecoration('Minutos a pie hacia la universidad'),
+                      validator: (v) {
+                        if (v == null || v.trim().isEmpty) {
+                          return 'Ingresa los minutos a pie';
+                        }
+                        final mins = int.tryParse(v.trim());
+                        if (mins == null || mins < 0) {
+                          return 'Ingresa un número entero válido';
+                        }
+                        return null;
+                      },
                     ),
-                    const SizedBox(height: 16),
-
-                    // Vista previa de fotos agregadas con Image.network y errorBuilder
-                    if (vm.photoUrls.isNotEmpty) ...[
-                      const Text(
-                        'Fotos agregadas:',
-                        style: TextStyle(
-                          fontSize: 13.5,
-                          fontWeight: FontWeight.w600,
-                          color: AppColors.texto,
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                      Wrap(
-                        spacing: 12,
-                        runSpacing: 12,
-                        children: [
-                          ...vm.photoUrls.asMap().entries.map((entry) {
-                            final index = entry.key;
-                            final url = entry.value;
-
-                            return Stack(
-                              clipBehavior: Clip.none,
-                              children: [
-                                ClipRRect(
-                                  borderRadius: BorderRadius.circular(12),
-                                  child: Container(
-                                    width: 95,
-                                    height: 95,
-                                    color:
-                                        AppColors.arena.withValues(alpha: 0.5),
-                                    child: Image.network(
-                                      url,
-                                      width: 95,
-                                      height: 95,
-                                      fit: BoxFit.cover,
-                                      loadingBuilder:
-                                          (context, child, loadingProgress) {
-                                        if (loadingProgress == null) {
-                                          return child;
-                                        }
-                                        return const Center(
-                                          child: SizedBox(
-                                            width: 22,
-                                            height: 22,
-                                            child: CircularProgressIndicator(
-                                              strokeWidth: 2,
-                                              color: AppColors.salvia,
-                                            ),
-                                          ),
-                                        );
-                                      },
-                                      errorBuilder:
-                                          (context, error, stackTrace) {
-                                        return Container(
-                                          width: 95,
-                                          height: 95,
-                                          color: AppColors.errorFondo,
-                                          padding: const EdgeInsets.all(6),
-                                          child: const Column(
-                                            mainAxisAlignment:
-                                                MainAxisAlignment.center,
-                                            children: [
-                                              Icon(
-                                                Icons.broken_image_outlined,
-                                                color: AppColors.errorTexto,
-                                                size: 26,
-                                              ),
-                                              SizedBox(height: 4),
-                                              Text(
-                                                'No carga',
-                                                textAlign: TextAlign.center,
-                                                style: TextStyle(
-                                                  fontSize: 10,
-                                                  color: AppColors.errorTexto,
-                                                  fontWeight: FontWeight.w600,
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                        );
-                                      },
-                                    ),
-                                  ),
-                                ),
-                                Positioned(
-                                  top: -6,
-                                  right: -6,
-                                  child: GestureDetector(
-                                    onTap: () => vm.removePhotoUrl(index),
-                                    child: Container(
-                                      padding: const EdgeInsets.all(4),
-                                      decoration: const BoxDecoration(
-                                        color: AppColors.terracota,
-                                        shape: BoxShape.circle,
-                                      ),
-                                      child: const Icon(
-                                        Icons.close,
-                                        color: AppColors.blanco,
-                                        size: 14,
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            );
-                          }),
-                        ],
-                      ),
-                    ],
                   ],
                 ),
-                const SizedBox(height: 28),
-
-                // Botón Publicar
-                SizedBox(
-                  height: 52,
-                  child: ElevatedButton(
-                    onPressed: vm.isLoading
-                        ? null
-                        : () => _submit(context, vm, user),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppColors.terracota,
-                      disabledBackgroundColor:
-                          AppColors.terracota.withValues(alpha: 0.6),
-                      foregroundColor: AppColors.blanco,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(14),
-                      ),
-                      elevation: 2,
-                    ),
-                    child: vm.isLoading
-                        ? const SizedBox(
-                            width: 24,
-                            height: 24,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2.5,
-                              color: AppColors.blanco,
-                            ),
-                          )
-                        : const Text(
-                            'Publicar propiedad',
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
-                              letterSpacing: 0.5,
-                            ),
-                          ),
-                  ),
-                ),
-                const SizedBox(height: 24),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildSectionCard({
-    required String title,
-    required IconData icon,
-    Widget? trailing,
-    required List<Widget> children,
-  }) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: AppColors.blanco,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: AppColors.texto.withValues(alpha: 0.04),
-            blurRadius: 8,
-            offset: const Offset(0, 3),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(icon, size: 20, color: AppColors.terracota),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  title,
-                  style: const TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.bold,
-                    color: AppColors.texto,
-                  ),
-                ),
               ),
-              if (trailing != null) trailing,
-            ],
-          ),
-          const Divider(height: 20),
-          ...children,
-        ],
-      ),
-    );
-  }
+            ),
+            const SizedBox(height: 24),
 
-  InputDecoration _inputDecoration({
-    required String labelText,
-    String? hintText,
-    IconData? prefixIcon,
-    String? suffixText,
-  }) {
-    return InputDecoration(
-      labelText: labelText,
-      hintText: hintText,
-      suffixText: suffixText,
-      prefixIcon: prefixIcon != null
-          ? Icon(prefixIcon, color: AppColors.salvia, size: 20)
-          : null,
-      labelStyle: const TextStyle(color: AppColors.texto, fontSize: 14),
-      hintStyle: const TextStyle(color: AppColors.hintTexto, fontSize: 13),
-      filled: true,
-      fillColor: AppColors.blanco,
-      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-      enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(12),
-        borderSide: const BorderSide(color: AppColors.bordeInput),
-      ),
-      focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(12),
-        borderSide: const BorderSide(color: AppColors.terracota, width: 1.5),
-      ),
-      errorBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(12),
-        borderSide: const BorderSide(color: AppColors.errorTexto),
-      ),
-      focusedErrorBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(12),
-        borderSide: const BorderSide(color: AppColors.errorTexto, width: 1.5),
+            // ==========================================
+            // 5. Botón "Guardar cambios" o "Publicar propiedad"
+            // ==========================================
+            ElevatedButton(
+              onPressed: _isSubmitting ? null : _submitProperty,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: _terracota,
+                foregroundColor: Colors.white,
+                minimumSize: const Size(double.infinity, 50),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              ),
+              child: _isSubmitting
+                  ? const SizedBox(
+                      width: 22,
+                      height: 22,
+                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                    )
+                  : Text(
+                      isEditing ? 'Guardar cambios' : 'Publicar propiedad',
+                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                    ),
+            ),
+            const SizedBox(height: 16),
+          ],
+        ),
       ),
     );
   }
