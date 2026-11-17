@@ -6,24 +6,38 @@ import 'package:flutter/material.dart';
 class PropertyImage extends StatelessWidget {
   final List<String> urls;
 
-  const PropertyImage({Key? key, required this.urls}) : super(key: key);
+  const PropertyImage({super.key, required this.urls});
 
   /// Constructor for a single image URL or base64 string.
-  PropertyImage.single({Key? key, required String imageUrl})
-      : urls = imageUrl.isEmpty ? const [] : [imageUrl],
-        super(key: key);
+  PropertyImage.single({super.key, required String imageUrl})
+      : urls = imageUrl.isEmpty ? const [] : [imageUrl];
 
   Widget _buildImage(String source) {
-    if (source.startsWith('data:image')) {
-      final base64Part = source.split(',').last;
-      final bytes = base64Decode(base64Part);
-      return Image.memory(
-        bytes,
-        fit: BoxFit.cover,
-        width: double.infinity,
+    if (source.isEmpty) {
+      return const SizedBox(
         height: 200,
-        errorBuilder: (_, __, ___) => const Icon(Icons.broken_image, size: 48),
+        child: Center(child: Icon(Icons.photo, size: 64, color: Colors.grey)),
       );
+    }
+    if (source.startsWith('data:image')) {
+      try {
+        final base64Part = source.split(',').last;
+        final bytes = base64Decode(base64Part);
+        return Image.memory(
+          bytes,
+          fit: BoxFit.cover,
+          width: double.infinity,
+          height: 200,
+          errorBuilder: (_, __, ___) => const Center(
+            child: Icon(Icons.broken_image, size: 48, color: Colors.grey),
+          ),
+        );
+      } catch (_) {
+        return const SizedBox(
+          height: 200,
+          child: Center(child: Icon(Icons.broken_image, size: 48, color: Colors.grey)),
+        );
+      }
     }
     // Assume a network URL.
     return Image.network(
@@ -31,7 +45,9 @@ class PropertyImage extends StatelessWidget {
       fit: BoxFit.cover,
       width: double.infinity,
       height: 200,
-      errorBuilder: (_, __, ___) => const Icon(Icons.broken_image, size: 48),
+      errorBuilder: (_, __, ___) => const Center(
+        child: Icon(Icons.broken_image, size: 48, color: Colors.grey),
+      ),
     );
   }
 

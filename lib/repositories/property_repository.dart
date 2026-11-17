@@ -3,10 +3,14 @@ import 'package:flutter/foundation.dart';
 import '../models/property.dart';
 
 class PropertyRepository {
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final FirebaseFirestore? _firestore;
+
+  PropertyRepository({FirebaseFirestore? firestore}) : _firestore = firestore;
+
+  FirebaseFirestore get _db => _firestore ?? FirebaseFirestore.instance;
 
   Future<Property> createProperty(Property property) async {
-    final docRef = await _firestore
+    final docRef = await _db
         .collection('properties')
         .add(property.toMap());
     final doc = await docRef.get();
@@ -17,19 +21,19 @@ class PropertyRepository {
     final data = property.toMap();
     // No sobrescribir createdAt si ya existe
     data.remove('createdAt');
-    await _firestore
+    await _db
         .collection('properties')
         .doc(property.id)
         .update(data);
   }
 
   Future<void> deleteProperty(String propertyId) async {
-    await _firestore.collection('properties').doc(propertyId).delete();
+    await _db.collection('properties').doc(propertyId).delete();
   }
 
   Future<List<Property>> getProperties() async {
     try {
-      final snapshot = await _firestore.collection('properties').get();
+      final snapshot = await _db.collection('properties').get();
       final List<Property> list = [];
       for (final doc in snapshot.docs) {
         try {
@@ -48,7 +52,7 @@ class PropertyRepository {
 
   Future<dynamic> getOwnerById(String ownerId) async {
     if (ownerId.isEmpty) return null;
-    final doc = await _firestore.collection('users').doc(ownerId).get();
+    final doc = await _db.collection('users').doc(ownerId).get();
     if (!doc.exists) return null;
     return doc.data();
   }

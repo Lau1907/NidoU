@@ -176,23 +176,24 @@ void main() {
       expect(viewModel.photoUrls, isEmpty);
     });
 
-    test('addPhotoUrl valida que la URL comience con https://', () {
-      // Intento con URL vacía
+    test('addPhotoUrl valida cadena no vacía y agrega URLs o Base64', () {
+      // Intento con foto vacía
       final emptyResult = viewModel.addPhotoUrl('');
       expect(emptyResult, isFalse);
-      expect(viewModel.errorMessage, contains('enlace'));
+      expect(viewModel.errorMessage, contains('agrega una foto'));
 
-      // Intento con http:// (no permitido)
-      final httpResult = viewModel.addPhotoUrl('http://inseguro.com/foto.jpg');
-      expect(httpResult, isFalse);
-      expect(viewModel.errorMessage, contains('https://'));
-
-      // Éxito con https://
-      final httpsResult =
+      // Éxito con URL
+      final urlResult =
           viewModel.addPhotoUrl('https://seguro.com/foto.jpg');
-      expect(httpsResult, isTrue);
+      expect(urlResult, isTrue);
       expect(viewModel.errorMessage, isNull);
       expect(viewModel.photoUrls.length, 1);
+
+      // Éxito con Base64
+      final b64Result = viewModel.addPhotoUrl('data:image/jpeg;base64,abc123');
+      expect(b64Result, isTrue);
+      expect(viewModel.errorMessage, isNull);
+      expect(viewModel.photoUrls.length, 2);
     });
 
     test('addPhotoUrl respeta límite máximo de 3 fotos', () {
