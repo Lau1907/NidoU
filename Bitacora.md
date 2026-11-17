@@ -265,9 +265,9 @@
 | Issue | Título | Responsable | Estado | Link |
 |---|---|---|---|---|
 | #10 | Perfil de usuario y favoritos | Laura / Vanesa | ✅ Hecho | github.com/Lau1907/NidoU/issues/10 |
-| #11 | Pruebas unitarias de ViewModels | Laura | 🔄 En progreso | github.com/Lau1907/NidoU/issues/11 |
-| #12 | Pruebas de interfaz (widget tests) | Vanesa | 🔄 En progreso | github.com/Lau1907/NidoU/issues/12 |
-| #13 | Corrección de bugs detectados en pruebas | Laura / Vanesa | 🔄 En progreso | github.com/Lau1907/NidoU/issues/13 |
+| #11 | Pruebas unitarias de ViewModels | Laura | ✅ Hecho | github.com/Lau1907/NidoU/issues/11 |
+| #12 | Pruebas de interfaz (widget tests) | Vanesa | ✅ Hecho | github.com/Lau1907/NidoU/issues/12 |
+| #13 | Corrección de bugs detectados en pruebas | Laura / Vanesa | ✅ Hecho | github.com/Lau1907/NidoU/issues/13 |
 | #14 | Preparar y ensayar demo en vivo del PMV | Laura / Vanesa | ⬜ Programado (20 nov) | github.com/Lau1907/NidoU/issues/14 |
 
 | Planeados | Terminados | En progreso | En revisión | Bloqueados |
