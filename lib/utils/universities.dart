@@ -14,12 +14,12 @@ class University {
 
 const Map<String, LatLng> universities = {
   'UTNG - Universidad Tecnológica del Norte de Guanajuato': LatLng(21.1669, -100.9317),
-  'UG - Universidad de Guanajuato (Campus Dolores Hidalgo)': LatLng(21.1583, -100.9344),
-  'ENUF - Escuela Normal Oficial de Dolores Hidalgo': LatLng(21.1538, -100.9369),
-  'UPP / Universidad Patria (Plantel Dolores Hidalgo)': LatLng(21.1552, -100.9325),
-  'UCEM - Universidad del Centro de México (Dolores Hidalgo)': LatLng(21.1567, -100.9312),
-  'CBTis No. 75 - Dolores Hidalgo': LatLng(21.1615, -100.9365),
-  'CECyTE Guanajuato - Plantel Dolores Hidalgo': LatLng(21.1489, -100.9412),
+  'UDHI - Universidad Dolores Hidalgo': LatLng(21.1578, -100.9332),
+  'Universidad Patria (Dolores Hidalgo)': LatLng(21.1545, -100.9318),
+  'Universidad de León (Plantel Dolores Hidalgo)': LatLng(21.1562, -100.9355),
+  'UPN - Universidad Pedagógica Nacional (Unidad 111)': LatLng(21.1530, -100.9380),
+  'UICEG - Instituto Universitario del Centro de México': LatLng(21.1588, -100.9305),
+  'CEDHI - Centro de Estudios Dolores Hidalgo': LatLng(21.1550, -100.9348),
 };
 
 const String defaultUniversity = 'UTNG - Universidad Tecnológica del Norte de Guanajuato';
