@@ -1,8 +1,13 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
+import 'package:flutter/services.dart'; // Added for Clipboard
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:url_launcher/url_launcher.dart';
+
 import '../models/property.dart';
 import '../repositories/property_repository.dart';
+import 'package:nidou/views/publish_property_view.dart';
+import 'package:nidou/widgets/property_image.dart';
 
 class PropertyDetailView extends StatefulWidget {
   final Property property;
@@ -19,11 +24,24 @@ class _PropertyDetailViewState extends State<PropertyDetailView> {
   static const Color salvia = Color(0xFFA7BEAE);
   static const Color texto = Color(0xFF3A2E2A);
 
-  int _currentPage = 0;
   bool _loadingOwner = false;
 
   Future<void> _openMap() async {
-    final query = Uri.encodeComponent(widget.property.location);
+    final property = widget.property;
+    String query;
+
+    if (property.latitude != null && property.longitude != null) {
+      query = '${property.latitude},${property.longitude}';
+    } else {
+      final regExp = RegExp(r'(-?\d+\.\d+),\s*(-?\d+\.\d+)');
+      final match = regExp.firstMatch(property.location);
+      if (match != null) {
+        query = '${match.group(1)},${match.group(2)}';
+      } else {
+        query = Uri.encodeComponent(property.location);
+      }
+    }
+
     final url = Uri.parse('https://www.google.com/maps/search/?api=1&query=$query');
     if (!await launchUrl(url, mode: LaunchMode.externalApplication)) {
       if (mounted) {
@@ -34,21 +52,78 @@ class _PropertyDetailViewState extends State<PropertyDetailView> {
     }
   }
 
+  Future<void> _editProperty() async {
+    final result = await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => PublishPropertyView(propertyToEdit: widget.property),
+      ),
+    );
+    if (result == true && mounted) {
+      Navigator.pop(context, true);
+    }
+  }
+
+  Future<void> _deleteProperty() async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: arena,
+        title: const Text('¿Eliminar publicación?', style: TextStyle(color: texto, fontWeight: FontWeight.bold)),
+        content: const Text(
+          'Esta acción no se puede deshacer.',
+          style: TextStyle(color: texto),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancelar', style: TextStyle(color: texto)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: terracota,
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Eliminar'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm == true) {
+      try {
+        await PropertyRepository().deleteProperty(widget.property.id);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Propiedad eliminada')),
+          );
+          Navigator.pop(context, true);
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Error al eliminar propiedad: $e')),
+          );
+        }
+      }
+    }
+  }
+
   Future<void> _contactOwner() async {
     setState(() => _loadingOwner = true);
     try {
-      final owner = await PropertyRepository().getOwnerById(widget.property.ownerId);
+      final ownerId = widget.property.ownerId;
+      final owner = await PropertyRepository().getOwnerById(ownerId);
       if (!mounted) return;
       setState(() => _loadingOwner = false);
-
       if (owner == null) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('No se encontró información del arrendador.')),
         );
         return;
       }
-
-      final name = (owner['name'] ?? owner['nombre'] ?? 'Arrendador NidoU').toString();
+      final name = (owner['name'] ?? owner['nombre'] ?? 'Arrendador').toString();
       final email = (owner['email'] ?? '').toString();
       final phone = (owner['phone'] ?? owner['telefono'] ?? '').toString();
 
@@ -64,69 +139,51 @@ class _PropertyDetailViewState extends State<PropertyDetailView> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                'Contactar arrendador',
-                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: texto),
-              ),
+              const Text('Contactar arrendador', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: texto)),
               const SizedBox(height: 12),
               ListTile(
                 contentPadding: EdgeInsets.zero,
-                leading: const CircleAvatar(
-                  backgroundColor: salvia,
-                  child: Icon(Icons.person, color: texto),
-                ),
+                leading: const CircleAvatar(backgroundColor: salvia, child: Icon(Icons.person, color: texto)),
                 title: Text(name, style: const TextStyle(fontWeight: FontWeight.bold, color: texto)),
-                subtitle: Text(
-                  [if (email.isNotEmpty) email, if (phone.isNotEmpty) phone].join(' • '),
-                  style: const TextStyle(color: texto),
-                ),
+                subtitle: Text([if (email.isNotEmpty) email, if (phone.isNotEmpty) phone].join(' • '), style: const TextStyle(color: texto)),
               ),
               const SizedBox(height: 16),
-              if (phone.isNotEmpty) ...[
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton.icon(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF25D366),
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 12),
+              if (phone.isNotEmpty)
+                Column(
+                  children: [
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton.icon(
+                        style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF25D366), foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(vertical: 12)),
+                        icon: const Icon(Icons.chat),
+                        label: const Text('Enviar WhatsApp'),
+                        onPressed: () async {
+                          final clean = phone.replaceAll(RegExp(r'[^0-9]'), '');
+                          final msg = Uri.encodeComponent('Hola, vi tu propiedad "${widget.property.title}" en NidoU y me interesa más información.');
+                          final wa = Uri.parse('https://wa.me/$clean?text=$msg');
+                          await launchUrl(wa, mode: LaunchMode.externalApplication);
+                        },
+                      ),
                     ),
-                    icon: const Icon(Icons.chat),
-                    label: const Text('Enviar WhatsApp'),
-                    onPressed: () async {
-                      final cleanPhone = phone.replaceAll(RegExp(r'[^0-9]'), '');
-                      final msg = Uri.encodeComponent(
-                        "Hola, vi tu propiedad '${widget.property.title}' en NidoU y me interesa más información.",
-                      );
-                      final waUrl = Uri.parse('https://wa.me/$cleanPhone?text=$msg');
-                      await launchUrl(waUrl, mode: LaunchMode.externalApplication);
-                    },
-                  ),
+                    const SizedBox(height: 10),
+                  ],
                 ),
-                const SizedBox(height: 10),
-              ],
               if (email.isNotEmpty)
                 Row(
                   children: [
                     Expanded(
                       child: ElevatedButton.icon(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: terracota,
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(vertical: 12),
-                        ),
+                        style: ElevatedButton.styleFrom(backgroundColor: terracota, foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(vertical: 12)),
                         icon: const Icon(Icons.email),
                         label: const Text('Enviar correo'),
                         onPressed: () async {
                           final subject = Uri.encodeComponent('Interés en ${widget.property.title} - NidoU');
-                          final mailUri = Uri.parse('mailto:$email?subject=$subject');
-                          final launched = await launchUrl(mailUri);
-                          if (!launched && ctx.mounted) {
+                          final mail = Uri.parse('mailto:$email?subject=$subject');
+                          final launched = await launchUrl(mail);
+                          if (!launched && mounted) {
                             await Clipboard.setData(ClipboardData(text: email));
                             Navigator.pop(ctx);
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(content: Text('Correo copiado: $email')),
-                            );
+                            ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Correo copiado: $email')));
                           }
                         },
                       ),
@@ -137,11 +194,9 @@ class _PropertyDetailViewState extends State<PropertyDetailView> {
                       icon: const Icon(Icons.copy, color: texto),
                       onPressed: () async {
                         await Clipboard.setData(ClipboardData(text: email));
-                        if (ctx.mounted) {
+                        if (mounted) {
                           Navigator.pop(ctx);
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(content: Text('Correo copiado: $email')),
-                          );
+                          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Correo copiado: $email')));
                         }
                       },
                     ),
@@ -154,187 +209,134 @@ class _PropertyDetailViewState extends State<PropertyDetailView> {
     } catch (e) {
       if (mounted) {
         setState(() => _loadingOwner = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error al cargar datos del arrendador: $e')),
-        );
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error al cargar datos del arrendador: $e')));
       }
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
     final property = widget.property;
     final price = '\$${property.price.toStringAsFixed(0)}/mes';
+    final isOwner = uid != null && uid == property.ownerId;
 
-    return Scaffold(
-      backgroundColor: arena,
-      appBar: AppBar(
-        title: const Text('Detalle de propiedad'),
-        backgroundColor: terracota,
-        foregroundColor: Colors.white,
-      ),
-      body: SingleChildScrollView(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            SizedBox(
-              height: 240,
-              child: property.photos.isEmpty
-                  ? Container(
-                      color: salvia.withValues(alpha: 0.3),
-                      child: const Center(child: Icon(Icons.home_work, size: 64, color: texto)),
-                    )
-                  : Stack(
-                      alignment: Alignment.bottomCenter,
-                      children: [
-                        PageView.builder(
-                          itemCount: property.photos.length,
-                          onPageChanged: (i) => setState(() => _currentPage = i),
-                          itemBuilder: (_, i) => Image.network(
-                            property.photos[i],
-                            fit: BoxFit.cover,
-                            width: double.infinity,
-                            errorBuilder: (_, __, ___) => Container(
-                              color: salvia.withValues(alpha: 0.3),
-                              child: const Center(
-                                child: Icon(Icons.broken_image, size: 48, color: texto),
-                              ),
-                            ),
-                          ),
-                        ),
-                        if (property.photos.length > 1)
-                          Padding(
-                            padding: const EdgeInsets.all(8.0),
-                            child: Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: List.generate(
-                                property.photos.length,
-                                (i) => Container(
-                                  margin: const EdgeInsets.symmetric(horizontal: 3),
-                                  width: 8,
-                                  height: 8,
-                                  decoration: BoxDecoration(
-                                    shape: BoxShape.circle,
-                                    color: _currentPage == i ? terracota : Colors.white70,
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ),
-                      ],
-                    ),
-            ),
-            Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+    return FutureBuilder<DocumentSnapshot?>(
+      future: uid != null ? FirebaseFirestore.instance.collection('users').doc(uid).get() : Future<DocumentSnapshot?>.value(null),
+      builder: (context, snapshot) {
+        final role = snapshot.data?.get('role')?.toString().toUpperCase() ?? '';
+        final hideContact = isOwner || role == 'ARRENDADOR';
+        return Scaffold(
+          backgroundColor: arena,
+          appBar: AppBar(
+            title: const Text('Detalle de propiedad'),
+            backgroundColor: terracota,
+            foregroundColor: Colors.white,
+            actions: [
+              if (isOwner) ...[
+                IconButton(
+                  icon: const Icon(Icons.edit),
+                  tooltip: 'Editar propiedad',
+                  onPressed: _editProperty,
+                ),
+                IconButton(
+                  icon: const Icon(Icons.delete),
+                  tooltip: 'Eliminar propiedad',
+                  onPressed: _deleteProperty,
+                ),
+              ],
+            ],
+          ),
+          body: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                SizedBox(height: 240, child: PropertyImage(urls: property.photos)),
+                Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Chip(
-                        label: Text(property.type.toUpperCase()),
-                        backgroundColor: salvia,
-                        labelStyle: const TextStyle(color: texto, fontWeight: FontWeight.bold),
-                      ),
-                      Text(
-                        price,
-                        style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: terracota),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    property.title,
-                    style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: texto),
-                  ),
-                  const SizedBox(height: 6),
-                  Row(
-                    children: [
-                      const Icon(Icons.directions_walk, size: 18, color: terracota),
-                      const SizedBox(width: 4),
-                      Text('${property.distanceMinutes} min a pie del campus',
-                          style: const TextStyle(color: texto)),
-                    ],
-                  ),
-                  const Divider(height: 24),
-                  const Text('Descripción',
-                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: texto)),
-                  const SizedBox(height: 6),
-                  Text(property.description, style: const TextStyle(color: texto, height: 1.4)),
-                  const SizedBox(height: 16),
-                  if (property.services.isNotEmpty) ...[
-                    const Text('Servicios incluidos',
-                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: texto)),
-                    const SizedBox(height: 8),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 6,
-                      children: property.services
-                          .map((s) => Chip(
-                                label: Text(s),
-                                backgroundColor: Colors.white,
-                                labelStyle: const TextStyle(color: texto),
-                              ))
-                          .toList(),
-                    ),
-                    const SizedBox(height: 16),
-                  ],
-                  Card(
-                    color: Colors.white,
-                    child: Padding(
-                      padding: const EdgeInsets.all(12),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          const Text('Ubicación',
-                              style: TextStyle(fontWeight: FontWeight.bold, color: texto)),
-                          const SizedBox(height: 4),
-                          Text(property.location, style: const TextStyle(color: texto)),
-                          const SizedBox(height: 10),
-                          SizedBox(
-                            width: double.infinity,
-                            child: OutlinedButton.icon(
-                              style: OutlinedButton.styleFrom(
-                                foregroundColor: terracota,
-                                side: const BorderSide(color: terracota),
-                              ),
-                              onPressed: _openMap,
-                              icon: const Icon(Icons.map),
-                              label: const Text('Ver en el mapa'),
-                            ),
-                          ),
+                          Chip(label: Text(property.type.toUpperCase()), backgroundColor: salvia, labelStyle: const TextStyle(color: texto, fontWeight: FontWeight.bold)),
+                          Text(price, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: terracota)),
                         ],
                       ),
+                      const SizedBox(height: 8),
+                      Text(property.title, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: texto)),
+                      const SizedBox(height: 6),
+                      const Divider(height: 24),
+                      const Text('Descripción', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: texto)),
+                      const SizedBox(height: 6),
+                      Text(property.description, style: const TextStyle(color: texto, height: 1.4)),
+                      const SizedBox(height: 16),
+                      if (property.services.isNotEmpty) ...[
+                        const Text('Servicios incluidos', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: texto)),
+                        const SizedBox(height: 8),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 6,
+                          children: property.services.map((s) => Chip(label: Text(s), backgroundColor: Colors.white, labelStyle: const TextStyle(color: texto))).toList(),
+                        ),
+                        const SizedBox(height: 16),
+                      ],
+                      Card(
+                        color: Colors.white,
+                        child: Padding(
+                          padding: const EdgeInsets.all(12),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text('Ubicación', style: TextStyle(fontWeight: FontWeight.bold, color: texto)),
+                              const SizedBox(height: 4),
+                              Text(property.location, style: const TextStyle(color: texto)),
+                              const SizedBox(height: 8),
+                              Row(
+                                children: [
+                                  const Icon(Icons.directions_walk, size: 18, color: terracota),
+                                  const SizedBox(width: 4),
+                                  Text('${property.distanceMinutes} min a pie del campus', style: const TextStyle(color: texto)),
+                                ],
+                              ),
+                              const SizedBox(height: 10),
+                              SizedBox(
+                                width: double.infinity,
+                                child: OutlinedButton.icon(
+                                  style: OutlinedButton.styleFrom(foregroundColor: terracota, side: const BorderSide(color: terracota)),
+                                  onPressed: _openMap,
+                                  icon: const Icon(Icons.map),
+                                  label: const Text('Ver en el mapa'),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          bottomNavigationBar: hideContact
+              ? null
+              : SafeArea(
+                  child: Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(backgroundColor: terracota, foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(vertical: 14)),
+                      onPressed: _loadingOwner ? null : _contactOwner,
+                      icon: _loadingOwner
+                          ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                          : const Icon(Icons.contact_phone),
+                      label: Text(_loadingOwner ? 'Cargando contacto...' : 'Contactar arrendador'),
                     ),
                   ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-      bottomNavigationBar: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(12),
-          child: ElevatedButton.icon(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: terracota,
-              foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(vertical: 14),
-            ),
-            onPressed: _loadingOwner ? null : _contactOwner,
-            icon: _loadingOwner
-                ? const SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                  )
-                : const Icon(Icons.contact_phone),
-            label: Text(_loadingOwner ? 'Cargando contacto...' : 'Contactar arrendador'),
-          ),
-        ),
-      ),
+                ),
+        );
+      },
     );
   }
 }

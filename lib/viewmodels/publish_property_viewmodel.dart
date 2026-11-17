@@ -11,17 +11,15 @@ class PublishPropertyViewModel extends ChangeNotifier {
   String? _errorMessage;
   final List<String> _photoUrls = [];
 
-  PublishPropertyViewModel({
-    PropertyRepository? propertyRepository,
-  }) : _propertyRepository = propertyRepository ?? PropertyRepository();
+  PublishPropertyViewModel({PropertyRepository? propertyRepository})
+      : _propertyRepository = propertyRepository ?? PropertyRepository();
 
-  // Getters de estado
+  // Getters
   bool get isLoading => _isLoading;
   String? get errorMessage => _errorMessage;
   List<String> get photoUrls => List.unmodifiable(_photoUrls);
-  List<String> get selectedPhotos => photoUrls;
 
-  /// Limpia el mensaje de error actual
+  // State management helpers
   void clearError() {
     if (_errorMessage != null) {
       _errorMessage = null;
@@ -29,13 +27,11 @@ class PublishPropertyViewModel extends ChangeNotifier {
     }
   }
 
-  /// Limpia la lista de fotos agregadas
   void clearPhotos() {
     _photoUrls.clear();
     notifyListeners();
   }
 
-  /// Restablece todo el estado del ViewModel
   void reset() {
     _isLoading = false;
     _errorMessage = null;
@@ -43,42 +39,25 @@ class PublishPropertyViewModel extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Agrega una URL de imagen a la lista (máximo 3).
-  /// Valida que la URL comience con https://.
-  bool addPhotoUrl(String url) {
+  /// Adds a photo (URL or Base64) to the list (max 3).
+  bool addPhotoUrl(String photo) {
     if (_photoUrls.length >= maxPhotos) {
       _errorMessage = 'Solo puedes agregar un máximo de $maxPhotos fotos.';
       notifyListeners();
       return false;
     }
-
-    final cleanUrl = url.trim();
-    if (cleanUrl.isEmpty) {
-      _errorMessage = 'Por favor, ingresa el enlace de la foto.';
+    final clean = photo.trim();
+    if (clean.isEmpty) {
+      _errorMessage = 'Por favor, agrega una foto.';
       notifyListeners();
       return false;
     }
-
-    if (!cleanUrl.startsWith('https://')) {
-      _errorMessage =
-          'El enlace debe comenzar con https:// (por seguridad no se permite http).';
-      notifyListeners();
-      return false;
-    }
-
-    if (_photoUrls.contains(cleanUrl)) {
-      _errorMessage = 'Esta foto ya ha sido agregada.';
-      notifyListeners();
-      return false;
-    }
-
-    _photoUrls.add(cleanUrl);
+    _photoUrls.add(clean);
     _errorMessage = null;
     notifyListeners();
     return true;
   }
 
-  /// Elimina una foto por su índice
   void removePhotoUrl(int index) {
     if (index >= 0 && index < _photoUrls.length) {
       _photoUrls.removeAt(index);
@@ -87,7 +66,6 @@ class PublishPropertyViewModel extends ChangeNotifier {
     }
   }
 
-  /// Método compatible para eliminar por índice o URL
   void removePhoto(dynamic photoOrIndex) {
     if (photoOrIndex is int) {
       removePhotoUrl(photoOrIndex);
@@ -100,8 +78,7 @@ class PublishPropertyViewModel extends ChangeNotifier {
     }
   }
 
-  /// Valida los campos requeridos y publica la propiedad en Firestore.
-  /// Valida: título, precio (>0), ubicación y al menos una foto (URL con https://).
+  /// Publishes a property to Firestore.
   Future<bool> publish({
     String? title,
     dynamic price,
@@ -121,7 +98,6 @@ class PublishPropertyViewModel extends ChangeNotifier {
     final effectiveServices = property?.services ?? services;
     final effectiveOwnerId = property?.ownerId ?? ownerId;
 
-    // Resolución de precio numérico
     double? parsedPrice;
     if (property != null) {
       parsedPrice = property.price;
@@ -131,19 +107,16 @@ class PublishPropertyViewModel extends ChangeNotifier {
       parsedPrice = double.tryParse(price.trim().replaceAll(',', '.'));
     }
 
-    // Validaciones en español
     if (effectiveTitle.trim().isEmpty) {
       _errorMessage = 'Por favor, ingresa el título de la publicación.';
       notifyListeners();
       return false;
     }
-
     if (parsedPrice == null || parsedPrice <= 0) {
       _errorMessage = 'Por favor, ingresa un precio mensual válido mayor a 0.';
       notifyListeners();
       return false;
     }
-
     if (effectiveLocation.trim().isEmpty) {
       _errorMessage = 'Por favor, ingresa la ubicación de la propiedad.';
       notifyListeners();
@@ -152,18 +125,11 @@ class PublishPropertyViewModel extends ChangeNotifier {
 
     final effectivePhotos = property?.photos ?? _photoUrls;
     if (effectivePhotos.isEmpty) {
-      _errorMessage =
-          'Debes agregar al menos una foto (enlace con https://) de la propiedad.';
+      _errorMessage = 'Debes agregar al menos una foto de la propiedad.';
       notifyListeners();
       return false;
     }
-
-    if (effectivePhotos.any((url) => !url.trim().startsWith('https://'))) {
-      _errorMessage =
-          'Todos los enlaces de fotos deben comenzar con https://.';
-      notifyListeners();
-      return false;
-    }
+    // No prefix validation – accept Base64 or URLs.
 
     if (effectiveOwnerId.trim().isEmpty) {
       _errorMessage = 'No fue posible identificar la cuenta del arrendador.';
@@ -184,14 +150,12 @@ class PublishPropertyViewModel extends ChangeNotifier {
         type: effectiveType,
         location: effectiveLocation.trim(),
         description: effectiveDescription.trim(),
-        services: effectiveServices,
+        services: List<String>.from(effectiveServices),
         photos: List<String>.from(effectivePhotos),
         ownerId: effectiveOwnerId.trim(),
         createdAt: DateTime.now(),
       );
-
       await _propertyRepository.createProperty(propertyToCreate);
-
       _photoUrls.clear();
       _isLoading = false;
       notifyListeners();

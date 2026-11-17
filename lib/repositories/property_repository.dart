@@ -13,6 +13,20 @@ class PropertyRepository {
     return Property.fromFirestore(doc);
   }
 
+  Future<void> updateProperty(Property property) async {
+    final data = property.toMap();
+    // No sobrescribir createdAt si ya existe
+    data.remove('createdAt');
+    await _firestore
+        .collection('properties')
+        .doc(property.id)
+        .update(data);
+  }
+
+  Future<void> deleteProperty(String propertyId) async {
+    await _firestore.collection('properties').doc(propertyId).delete();
+  }
+
   Future<List<Property>> getProperties() async {
     try {
       final snapshot = await _firestore.collection('properties').get();
